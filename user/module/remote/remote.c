@@ -9,7 +9,6 @@
 RC_Ctl_t rc_data = {.rc = {1024, 1024, 1024, 1024, 1, 1}};
 
 volatile uint32_t remote_uart_error_count;
-volatile uint32_t remote_frame_gap_error;
 volatile uint32_t remote_frame_invalid_count;
 volatile uint32_t remote_dma_overrun_count;
 

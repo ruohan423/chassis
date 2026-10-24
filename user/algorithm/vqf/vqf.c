@@ -223,7 +223,6 @@ static void quatConj(const vqf_real_t q[4], vqf_real_t out[4])
     out[0] = w; out[1] = x; out[2] = y; out[3] = z;
 }
 
-
 static void quatSetToIdentity(vqf_real_t out[4])
 {
     out[0] = 1;

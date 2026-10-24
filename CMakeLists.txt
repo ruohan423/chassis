@@ -33,17 +33,30 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-        user/bmi088/BMI088driver.c
-        user/bmi088/BMI088driver.h
-        user/bmi088/BMI088Middleware.c
-        user/bmi088/BMI088Middleware.h
-        user/bmi088/BMI088reg.h
-        user/vqf/vqf.c
-        user/vqf/vqf.h
+        user/module/bmi088/BMI088driver.c
+        user/module/bmi088/BMI088driver.h
+        user/module/bmi088/BMI088Middleware.c
+        user/module/bmi088/BMI088Middleware.h
+        user/module/bmi088/BMI088reg.h
+        user/algorithm/vqf/vqf.c
+        user/algorithm/vqf/vqf.h
+        user/algorithm/calibration/calibration.c
+        user/algorithm/calibration/calibration.h
+        user/algorithm/calibration/calibration_session.c
+        user/algorithm/calibration/calibration_session.h
+        user/algorithm/calibration/bias_config.h
+        user/algorithm/pid/pid.c
+        user/algorithm/pid/pid.h
+        user/calib_task.c
+        user/calib_task.h
         user/ins_task.c
-        user/remote/remote.c
-        user/remote/remote.h
+        user/module/remote/remote.c
+        user/module/remote/remote.h
+        user/peripheral/uart/user_uart.c
+        user/peripheral/uart/user_uart.h
         user/remote_task.c
+        user/peripheral/pwm/user_pwm.c
+        user/peripheral/pwm/user_pwm.h
 )
 
 # Add STM32CubeMX generated sources
@@ -56,16 +69,29 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-        ${CMAKE_SOURCE_DIR}/user/bmi088/BMI088driver.c
-        ${CMAKE_SOURCE_DIR}/user/bmi088/BMI088Middleware.c
-        ${CMAKE_SOURCE_DIR}/user/vqf/vqf.c
+        ${CMAKE_SOURCE_DIR}/user/module/bmi088/BMI088driver.c
+        ${CMAKE_SOURCE_DIR}/user/module/bmi088/BMI088Middleware.c
+        ${CMAKE_SOURCE_DIR}/user/algorithm/vqf/vqf.c
+        ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration.c
+        ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration_session.c
+        ${CMAKE_SOURCE_DIR}/user/algorithm/pid/pid.c
+        ${CMAKE_SOURCE_DIR}/user/calib_task.c
+        ${CMAKE_SOURCE_DIR}/user/module/remote/remote.c
+        ${CMAKE_SOURCE_DIR}/user/peripheral/uart/user_uart.c
+        ${CMAKE_SOURCE_DIR}/user/peripheral/pwm/user_pwm.c
     # Add user sources here
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-        ${CMAKE_SOURCE_DIR}/user/bmi088
-        ${CMAKE_SOURCE_DIR}/user/vqf
+        ${CMAKE_SOURCE_DIR}/user
+        ${CMAKE_SOURCE_DIR}/user/algorithm/calibration
+        ${CMAKE_SOURCE_DIR}/user/algorithm/pid
+        ${CMAKE_SOURCE_DIR}/user/algorithm/vqf
+        ${CMAKE_SOURCE_DIR}/user/module/bmi088
+        ${CMAKE_SOURCE_DIR}/user/module/remote
+        ${CMAKE_SOURCE_DIR}/user/peripheral/pwm
+        ${CMAKE_SOURCE_DIR}/user/peripheral/uart
     # Add user defined include paths
 )
 

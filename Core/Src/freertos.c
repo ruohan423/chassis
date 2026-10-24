@@ -61,6 +61,11 @@ const osThreadAttr_t remote_task_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for RemoteSem */
+osSemaphoreId_t RemoteSemHandle;
+const osSemaphoreAttr_t RemoteSem_attributes = {
+  .name = "RemoteSem"
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -85,6 +90,10 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* creation of RemoteSem */
+  RemoteSemHandle = osSemaphoreNew(1, 0, &RemoteSem_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */

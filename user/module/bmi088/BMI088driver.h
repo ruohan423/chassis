@@ -20,16 +20,16 @@
 #define BMI088_ACCEL_IIC_ADDRESSE (0x18 << 1)
 #define BMI088_GYRO_IIC_ADDRESSE (0x68 << 1)
 
-#define BMI088_ACCEL_RANGE_3G
-//#define BMI088_ACCEL_RANGE_6G
-//#define BMI088_ACCEL_RANGE_12G
-//#define BMI088_ACCEL_RANGE_24G
+//#define BMI088_ACCEL_RANGE_3G // 加速度计量程 3G。
+//#define BMI088_ACCEL_RANGE_6G // 加速度计量程 6G。
+//#define BMI088_ACCEL_RANGE_12G // 加速度计量程 12G。
+#define BMI088_ACCEL_RANGE_24G
 
 #define BMI088_GYRO_RANGE_2000
-//#define BMI088_GYRO_RANGE_1000
-//#define BMI088_GYRO_RANGE_500
-//#define BMI088_GYRO_RANGE_250
-//#define BMI088_GYRO_RANGE_125
+//#define BMI088_GYRO_RANGE_1000 // 陀螺仪量程 1000 dps。
+//#define BMI088_GYRO_RANGE_500 // 陀螺仪量程 500 dps。
+//#define BMI088_GYRO_RANGE_250 // 陀螺仪量程 250 dps。
+//#define BMI088_GYRO_RANGE_125 // 陀螺仪量程 125 dps。
 
 
 #define BMI088_ACCEL_3G_SEN 0.0008974358974f
@@ -94,6 +94,7 @@ enum
 extern uint8_t BMI088_init(void);
 extern unsigned char bmi088_accel_init(void);
 extern unsigned char bmi088_gyro_init(void);
+extern uint8_t BMI088_accel_data_ready(void);
 
 extern void BMI088_read(float gyro[3], float accel[3], float *temperate);
 

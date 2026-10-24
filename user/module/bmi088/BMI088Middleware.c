@@ -5,15 +5,15 @@ extern SPI_HandleTypeDef hspi1;
 
 void BMI088_GPIO_init(void)
 {
-    // MX_GPIO_Init()
+    // GPIO 初始化由 MX_GPIO_Init() 完成。
 }
 
 void BMI088_com_init(void)
 {
-    // MX_SPI1_Init()
+    // SPI 初始化由 MX_SPI1_Init() 完成。
 }
 
-//Only during the initalisation call
+// 仅在初始化调用期间使用。
 //
 // void BMI088_delay_ms(uint16_t ms)
 // {

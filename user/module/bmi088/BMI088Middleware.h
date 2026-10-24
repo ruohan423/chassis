@@ -4,7 +4,7 @@
 
 #define BMI088_USE_SPI
 #include <stdint.h>
-//#define BMI088_USE_IIC
+//#define BMI088_USE_IIC // 使用 I2C 接口。
 
 extern void BMI088_GPIO_init(void);
 extern void BMI088_com_init(void);
