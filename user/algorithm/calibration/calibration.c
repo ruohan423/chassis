@@ -4,32 +4,8 @@
 #include <math.h>
 #include <stddef.h>
 
-static bool is_valid_config(const gyro_cal_cfg_t *config)
-{
-    return config
-        && config->samples >= 2U
-        && isfinite(config->duration_s)
-        && config->duration_s > 0.0f
-        && isfinite(config->max_gap_s)
-        && config->max_gap_s > 0.0f
-        && isfinite(config->max_gyr_norm)
-        && config->max_gyr_norm > 0.0f
-        && isfinite(config->max_gyr_sigma)
-        && config->max_gyr_sigma > 0.0f
-        && isfinite(config->acc_norm_tol_ms2)
-        && config->acc_norm_tol_ms2 > 0.0f
-        && isfinite(config->max_acc_sigma_ms2)
-        && config->max_acc_sigma_ms2 > 0.0f
-        && isfinite(config->max_temp_drift)
-        && config->max_temp_drift > 0.0f;
-}
-
 void gyro_cal_default(gyro_cal_cfg_t *config)
 {
-    if (!config) {
-        return;
-    }
-
     *config = (gyro_cal_cfg_t){
         .samples = CAL_SAMPLES,
         .duration_s = CAL_DURATION_S,
@@ -42,11 +18,11 @@ void gyro_cal_default(gyro_cal_cfg_t *config)
     };
 }
 
-static void update_statistics(uint32_t gyr_n,const float sample[CAL_AXES],float mean[CAL_AXES],float m2[CAL_AXES])
+static void update_statistics(uint32_t count,const float sample[CAL_AXES],float mean[CAL_AXES],float m2[CAL_AXES])
 {
     for (size_t axis = 0; axis < CAL_AXES; ++axis) {
         const float error_from_mean = sample[axis] - mean[axis];
-        mean[axis] += error_from_mean / (float)gyr_n;
+        mean[axis] += error_from_mean / (float)count;
         m2[axis] += error_from_mean * (sample[axis] - mean[axis]);
     }
 }
@@ -66,16 +42,7 @@ static float max_sigma(uint32_t n, const float m2[CAL_AXES])
 
 void gyro_cal_init(gyro_cal_t *gyro_cal, const gyro_cal_cfg_t *config)
 {
-    if (!gyro_cal) {
-        return;
-    }
-
     *gyro_cal = (gyro_cal_t){0};
-    if (!is_valid_config(config)) {
-        gyro_cal->rejected = true;
-        return;
-    }
-
     gyro_cal->config = *config;
     gyro_cal->temp_min = INFINITY;
     gyro_cal->temp_max = -INFINITY;
@@ -84,22 +51,9 @@ void gyro_cal_init(gyro_cal_t *gyro_cal, const gyro_cal_cfg_t *config)
 cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float gyr[CAL_AXES],
                            const float accel_ms2[CAL_AXES], bool acc_ready, float temp_c)
 {
-    if (!gyro_cal || !gyr || (acc_ready && !accel_ms2)
-        || !isfinite(gyr[0]) || !isfinite(gyr[1])
-        || !isfinite(gyr[2])
-        || !isfinite(temp_c) || gyro_cal->rejected) {
-        return CAL_INVALID;
-    }
-
-    if (acc_ready
-        && (!isfinite(accel_ms2[0]) || !isfinite(accel_ms2[1]) || !isfinite(accel_ms2[2]))) {
-        return CAL_INVALID;
-    }
-
     if (gyro_cal->has_time) {
         const uint32_t elapsed_ms = time_ms - gyro_cal->last_ms;
         if ((float)elapsed_ms * 0.001f > gyro_cal->config.max_gap_s) {
-            gyro_cal->rejected = true;
             return CAL_GAP;
         }
     } else {
@@ -111,7 +65,6 @@ cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float g
     const float gyro_norm = sqrtf(gyr[0] * gyr[0]
         + gyr[1] * gyr[1] + gyr[2] * gyr[2]);
     if (gyro_norm > gyro_cal->config.max_gyr_norm) {
-        gyro_cal->rejected = true;
         return CAL_GYR_MOTION;
     }
 
@@ -119,7 +72,6 @@ cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float g
         const float accel_norm = sqrtf(accel_ms2[0] * accel_ms2[0]
             + accel_ms2[1] * accel_ms2[1] + accel_ms2[2] * accel_ms2[2]);
         if (fabsf(accel_norm - GRAVITY_MS2) > gyro_cal->config.acc_norm_tol_ms2) {
-            gyro_cal->rejected = true;
             return CAL_ACC_MOTION;
         }
     }
@@ -129,7 +81,6 @@ cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float g
         const float next_max_temperature = fmaxf(gyro_cal->temp_max, temp_c);
         if (next_max_temperature - next_min_temperature
             > gyro_cal->config.max_temp_drift) {
-            gyro_cal->rejected = true;
             return CAL_TEMP;
         }
     }
@@ -151,13 +102,11 @@ cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float g
         ? CAL_OK : CAL_BUSY;
 }
 
+/* 仅在 gyro_cal_push 返回 CAL_OK 后调用 */
 cal_status_t gyro_cal_finish(const gyro_cal_t *gyro_cal, gyro_bias_t *result)
 {
-    if (!gyro_cal || !result || gyro_cal->rejected
-        || gyro_cal->gyr_n < gyro_cal->config.samples
-        || gyro_cal->gyr_n < 2U || gyro_cal->acc_n < 2U
-        || gyro_cal->temp_count < 2U
-        || !gyro_cal->has_time) {
+    /* 方差计算至少需要两个加速度样本 */
+    if (gyro_cal->acc_n < 2U) {
         return CAL_INVALID;
     }
 

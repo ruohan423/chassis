@@ -47,16 +47,57 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/algorithm/calibration/bias_config.h
         user/algorithm/pid/pid.c
         user/algorithm/pid/pid.h
-        user/calib_task.c
-        user/calib_task.h
-        user/ins_task.c
+        user/task/calib_task.c
+        user/task/calib_task.h
+        user/task/ins_task.c
         user/module/remote/remote.c
         user/module/remote/remote.h
         user/peripheral/uart/user_uart.c
         user/peripheral/uart/user_uart.h
-        user/remote_task.c
-        user/peripheral/pwm/user_pwm.c
-        user/peripheral/pwm/user_pwm.h
+        user/task/remote_task.c
+        user/task/judge_task.c
+        user/task/judge_task.h
+        user/peripheral/dwt/user_dwt.c
+        user/peripheral/dwt/user_dwt.h
+        user/module/motor/motor.c
+        user/module/motor/motor.h
+        user/peripheral/watchdog/watchdog.c
+        user/peripheral/watchdog/watchdog.h
+        user/task/watch_task.c
+        user/task/watch_task.h
+        user/module/buzzer/buzzer.c
+        user/module/buzzer/buzzer.h
+        user/module/led/board_led.c
+        user/module/led/board_led.h
+        user/task/text/motor_test_task.c
+        user/task/text/motor_test_task.h
+        user/peripheral/can/user_can.c
+        user/peripheral/can/user_can.h
+        user/task/chassis_task.c
+        user/algorithm/ramp/ramp.c
+        user/algorithm/ramp/ramp.h
+        user/module/judge/judge.c
+        user/module/judge/judge.h
+        user/module/supercapacitor/super_capacitor.c
+        user/module/supercapacitor/super_capacitor.h
+        user/control/chassis/chassis_controller/chassis_controller.c
+        user/control/chassis/chassis_controller/chassis_controller.h
+        user/control/heater/heater.c
+        user/control/heater/heater.h
+        user/control/chassis/power_controller/power_controller.c
+        user/control/chassis/power_controller/power_controller.h
+        user/algorithm/rls/rls.c
+        user/algorithm/rls/rls.h
+        user/control/chassis/chassis_external/chassis.c
+        user/control/chassis/chassis_external/chassis.h
+        user/control/chassis/chassis_config.h
+        user/control/chassis/chassis_port/chassis_port.c
+        user/control/chassis/chassis_port/chassis_port.h
+        user/task/power_task.c
+        user/task/power_task.h
+        user/task/remote_task.h
+        user/task/ins_task.h
+        user/task/chassis_task.h
 )
 
 # Add STM32CubeMX generated sources
@@ -75,10 +116,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration.c
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration_session.c
         ${CMAKE_SOURCE_DIR}/user/algorithm/pid/pid.c
-        ${CMAKE_SOURCE_DIR}/user/calib_task.c
+        ${CMAKE_SOURCE_DIR}/user/task/calib_task.c
         ${CMAKE_SOURCE_DIR}/user/module/remote/remote.c
         ${CMAKE_SOURCE_DIR}/user/peripheral/uart/user_uart.c
-        ${CMAKE_SOURCE_DIR}/user/peripheral/pwm/user_pwm.c
+        ${CMAKE_SOURCE_DIR}/user/peripheral/dwt/user_dwt.c
     # Add user sources here
 )
 
@@ -89,9 +130,25 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/algorithm/pid
         ${CMAKE_SOURCE_DIR}/user/algorithm/vqf
         ${CMAKE_SOURCE_DIR}/user/module/bmi088
+        ${CMAKE_SOURCE_DIR}/user/module/motor
         ${CMAKE_SOURCE_DIR}/user/module/remote
-        ${CMAKE_SOURCE_DIR}/user/peripheral/pwm
         ${CMAKE_SOURCE_DIR}/user/peripheral/uart
+        ${CMAKE_SOURCE_DIR}/user/peripheral/dwt
+        ${CMAKE_SOURCE_DIR}/user/peripheral/watchdog
+        ${CMAKE_SOURCE_DIR}/user/module/buzzer
+        ${CMAKE_SOURCE_DIR}/user/module/led
+        ${CMAKE_SOURCE_DIR}/user/peripheral/can
+        ${CMAKE_SOURCE_DIR}/user/task
+        ${CMAKE_SOURCE_DIR}/user/control/chassis
+        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_external
+        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_port
+        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_controller
+        ${CMAKE_SOURCE_DIR}/user/control/chassis/power_controller
+        ${CMAKE_SOURCE_DIR}/user/control/heater
+        ${CMAKE_SOURCE_DIR}/user/algorithm/ramp
+        ${CMAKE_SOURCE_DIR}/user/algorithm/rls
+        ${CMAKE_SOURCE_DIR}/user/module/judge
+        ${CMAKE_SOURCE_DIR}/user/module/supercapacitor
     # Add user defined include paths
 )
 

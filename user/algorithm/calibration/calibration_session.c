@@ -2,90 +2,31 @@
 #include "bias_config.h"
 
 #include <math.h>
-#include <stddef.h>
 #include <string.h>
-
-static bool is_valid_config(const cal_session_cfg_t *config)
-{
-    return config
-        && isfinite(config->target_c)
-        && isfinite(config->temp_tol_c)
-        && config->temp_tol_c > 0.0f
-        && config->stable_n > 0U
-        && isfinite(config->obs_period_s)
-        && config->obs_period_s > 0.0f
-        && isfinite(config->warmup_max_s)
-        && config->warmup_max_s > 0.0f
-        && isfinite(config->max_gap_s)
-        && config->max_gap_s > 0.0f
-        && config->stationary.samples >= 2U
-        && isfinite(config->stationary.max_gap_s)
-        && config->stationary.max_gap_s > 0.0f;
-}
 
 void cal_session_default(cal_session_cfg_t *config)
 {
-    if (!config) {
-        return;
-    }
-
-    *config = (cal_session_cfg_t){.target_c = TEMP_TARGET_C, .temp_tol_c = TEMP_TOL_C,
-        .stable_n = TEMP_STABLE_N, .obs_period_s = TEMP_OBS_PERIOD_S,
-        .warmup_max_s = CAL_WARMUP_S, .max_gap_s = CAL_GAP_S};
+    *config = (cal_session_cfg_t){
+        .target_c = TEMP_TARGET_C,
+        .temp_tol_c = TEMP_TOL_C,
+        .stable_n = TEMP_STABLE_N,
+        .obs_period_s = TEMP_OBS_PERIOD_S,
+        .warmup_max_s = CAL_WARMUP_S,
+        .max_gap_s = CAL_GAP_S};
     gyro_cal_default(&config->stationary);
 }
 
 void cal_session_init(cal_session_t *session, const cal_session_cfg_t *config)
 {
-    if (!session) {
-        return;
-    }
-
     memset(session, 0, sizeof(*session));
-    session->state = CAL_SESSION_FAIL;
-    if (!is_valid_config(config)) {
-        return;
-    }
-
     session->config = *config;
     session->state = CAL_SESSION_IDLE;
 }
 
-bool cal_session_start(cal_session_t *session)
+void cal_session_start(cal_session_t *session)
 {
-    if (!session || session->state == CAL_SESSION_FAIL) {
-        return false;
-    }
-
     gyro_cal_init(&session->gyro_cal, &session->config.stationary);
     session->state = CAL_SESSION_WARMUP;
-    session->stable_n = 0U;
-    session->start_ms = 0U;
-    session->last_obs_ms = 0U;
-    session->ref_temp_c = 0.0f;
-    session->has_ref_temp = false;
-    session->has_obs = false;
-    session->has_last = false;
-
-    if (session->gyro_cal.rejected) {
-        session->state = CAL_SESSION_FAIL;
-        return false;
-    }
-
-    return true;
-}
-
-void cal_session_cancel(cal_session_t *session)
-{
-    if (!session) {
-        return;
-    }
-
-    session->state = CAL_SESSION_IDLE;
-    session->stable_n = 0U;
-    session->has_ref_temp = false;
-    session->has_obs = false;
-    session->has_last = false;
 }
 
 cal_status_t cal_session_push(
@@ -96,16 +37,6 @@ cal_status_t cal_session_push(
     bool acc_ready,
     float temp_c)
 {
-    if (!session || !gyr || (acc_ready && !accel_ms2)
-        || !isfinite(gyr[0]) || !isfinite(gyr[1])
-        || !isfinite(gyr[2])
-        || !isfinite(temp_c)) {
-        return CAL_INVALID;
-    }
-    if (acc_ready && (!isfinite(accel_ms2[0]) || !isfinite(accel_ms2[1]) || !isfinite(accel_ms2[2]))) {
-        return CAL_INVALID;
-    }
-
     if (session->state == CAL_SESSION_WARMUP) {
         if (session->has_last) {
             const uint32_t elapsed_ms = time_ms - session->last_ms;
@@ -159,6 +90,7 @@ cal_status_t cal_session_push(
         return CAL_BUSY;
     }
 
+    /* 会话已失败或已完成时拒绝继续采集 */
     if (session->state != CAL_SESSION_SAMPLE) {
         return CAL_INVALID;
     }
@@ -191,12 +123,10 @@ cal_status_t cal_session_push(
 
 cal_session_state_t cal_session_state(const cal_session_t *session)
 {
-    return session ? session->state : CAL_SESSION_FAIL;
+    return session->state;
 }
 
 const gyro_bias_t *cal_session_result(const cal_session_t *session)
 {
-    if (!session || session->state != CAL_SESSION_DONE) return NULL;
-
     return &session->result;
 }

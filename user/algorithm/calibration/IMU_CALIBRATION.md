@@ -66,5 +66,5 @@ BMI088 驱动直接输出陀螺仪 `rad/s`、加速度 `m/s^2` 和温度 `°C`�
 加热由公共 PID 控制模块统一执行。校准期间由校准任务更新 PID；校准成功后，INS
 周期继续使用同一个 PID 状态和 PWM 输出维持目标温度。
 
-加热和蜂鸣器由 `../peripheral/pwm/pwm.c` 统一封装。校准成功时蜂鸣器鸣叫 500 ms；
+加热器 `user/control/heater/heater.c` 和蜂鸣器 `user/module/buzzer/buzzer.c` 直接调用 HAL 定时器接口与比较值宏，不再单独封装 PWM。校准成功时蜂鸣器鸣叫 500 ms；
 校准失败时蜂鸣器鸣 200 ms、停 200 ms，重复两次。校准成功后不会关闭加热 PWM。

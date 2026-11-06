@@ -1,6 +1,7 @@
 //
 // 创建日期：2026/10/7。
 //
+#include "ins_task.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -9,7 +10,8 @@
 
 #include "calib_task.h"
 #include "bias_config.h"
-#include "user_pwm.h"
+#include "heater.h"
+#include "watch_task.h"
 #include "vqf.h"
 
 #define RAD_TO_DEG 57.295779513f
@@ -55,18 +57,6 @@ void INS_Task(void *argument)
             osDelay(1000U);
         }
     }
-#if CAL_ON_STARTUP != 0U
-    if (!Calib_GetBias(gyro_bias, &gyro_bias_sigma))
-    {
-        for (;;)
-        {
-            osDelay(1000U);
-        }
-    }
-#else
-    load_bias();
-#endif
-
     initVqf(VQF_GYR_DT, VQF_ACC_DT, 0.0f);
     setBiasEstimate(gyro_bias, gyro_bias_sigma);
     next_tick = osKernelGetTickCount();
@@ -74,19 +64,14 @@ void INS_Task(void *argument)
 
     for (;;)
     {
-
-        if (!Calib_ReadImu(gyro, accel, &temperature_c))
-        {
-            next_tick += 1U;
-            osDelayUntil(next_tick);
-            continue;
-        }
+        Calib_ReadImu(gyro, accel, &temperature_c);
+        swdg_feed_imu();
 
         const uint32_t now_tick = osKernelGetTickCount();
         const uint32_t heater_elapsed_ticks = now_tick - last_heater_tick;
         if ((float)heater_elapsed_ticks * 0.001f >= HEATER_CONTROL_PERIOD_S)
         {
-            (void)Pwm_HeaterUpdate(temperature_c, (float)heater_elapsed_ticks * 0.001f);
+            (void)heater_update(temperature_c, (float)heater_elapsed_ticks * 0.001f);
             last_heater_tick = now_tick;
         }
 
@@ -123,9 +108,12 @@ static bool startup_ready(void)
 #if CAL_ON_STARTUP != 0U
     if (!Calib_TaskStart()) return false;
     while (!Calib_IsReady() && !Calib_IsFailed()) osDelay(10U);
-    return Calib_IsReady();
+    if (!Calib_IsReady()) return false;
+    Calib_GetBias(gyro_bias, &gyro_bias_sigma);
+    return true;
 #else
-    return Pwm_HeaterInit();
+    load_bias();
+    return heater_init();
 #endif
 }
 

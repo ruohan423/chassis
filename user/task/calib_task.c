@@ -7,15 +7,14 @@
 #include "bias_config.h"
 #include "calibration_session.h"
 #include "cmsis_os2.h"
-#include "user_pwm.h"
+#include "buzzer.h"
+#include "heater.h"
 
-static osMutexId_t imu_mutex;
 static volatile bool calibration_ready;
 static volatile bool calibration_failed;
 static float calibrated_bias[CAL_AXES];
 static float calibrated_sigma;
 static float sensor_temp_c;
-static osThreadId_t calib_task_id;
 static cal_session_cfg_t calibration_config;
 static cal_session_t calibration_session;
 
@@ -28,34 +27,23 @@ static const osThreadAttr_t calib_task_attributes = {
 static void Calib_Task(void *argument);
 static bool run_gyro_cal(void);
 
+/* 只在 INS 任务启动阶段调用一次；校准任务退出后 INS 才开始读 IMU，两者不并发 */
 bool Calib_TaskStart(void)
 {
-    if (CAL_ON_STARTUP == 0U || calib_task_id != NULL) return false;
-
     calibration_ready = false;
     calibration_failed = false;
-    if (imu_mutex == NULL)
-    {
-        imu_mutex = osMutexNew(NULL);
-        if (imu_mutex == NULL)
-        {
-            calibration_failed = true;
-            return false;
-        }
-    }
-
-    calib_task_id = osThreadNew(Calib_Task, NULL, &calib_task_attributes);
-    if (calib_task_id == NULL)
+    if (osThreadNew(Calib_Task, NULL, &calib_task_attributes) == NULL)
     {
         calibration_failed = true;
         return false;
     }
     return true;
 }
+
 static void Calib_Task(void *argument)
 {
     (void)argument;
-    if (!Pwm_HeaterInit() || !Pwm_BuzzerInit())
+    if (!heater_init() || !buzzer_init())
     {
         calibration_failed = true;
         osThreadExit();
@@ -63,13 +51,13 @@ static void Calib_Task(void *argument)
 
     if (run_gyro_cal())
     {
-        Pwm_BuzzerPlay(PWM_BUZZER_CALIBRATION_SUCCESS);
+        buzzer_play(BUZZER_TONE_SUCCESS);
     }
     else
     {
         calibration_failed = true;
-        Pwm_BuzzerPlay(PWM_BUZZER_CALIBRATION_FAILURE);
-        Pwm_HeaterStop();
+        buzzer_play(BUZZER_TONE_ERROR);
+        heater_stop();
     }
 
     osThreadExit();
@@ -85,32 +73,21 @@ bool Calib_IsFailed(void)
     return calibration_failed;
 }
 
-bool Calib_ReadImu(float gyro[CAL_AXES], float accel[CAL_AXES], float *temperature_c)
+void Calib_ReadImu(float gyro[CAL_AXES], float accel[CAL_AXES], float *temperature_c)
 {
-    if (!gyro || !accel || !temperature_c) return false;
-    if (imu_mutex && osMutexAcquire(imu_mutex, osWaitForever) != osOK) return false;
-
     BMI088_read(gyro, accel, temperature_c);
-    if (imu_mutex) (void)osMutexRelease(imu_mutex);
-    return true;
 }
 
 bool Calib_IsAccelReady(void)
 {
-    uint8_t ready;
-
-    if (imu_mutex && osMutexAcquire(imu_mutex, osWaitForever) != osOK) return false;
-    ready = BMI088_accel_data_ready();
-    if (imu_mutex) (void)osMutexRelease(imu_mutex);
-    return ready != 0U;
+    return BMI088_accel_data_ready() != 0U;
 }
 
-bool Calib_GetBias(float bias[CAL_AXES], float *sigma)
+/* 仅在 Calib_IsReady 为真后调用 */
+void Calib_GetBias(float bias[CAL_AXES], float *sigma)
 {
-    if (!bias || !sigma || !calibration_ready) return false;
     for (uint32_t axis = 0U; axis < CAL_AXES; ++axis) bias[axis] = calibrated_bias[axis];
     *sigma = calibrated_sigma;
-    return true;
 }
 
 static bool run_gyro_cal(void)
@@ -123,33 +100,33 @@ static bool run_gyro_cal(void)
 
     cal_session_default(&calibration_config);
     cal_session_init(&calibration_session, &calibration_config);
-    if (cal_session_state(&calibration_session) != CAL_SESSION_IDLE) return false;
-    if (!cal_session_start(&calibration_session)) return false;
+    cal_session_start(&calibration_session);
+    buzzer_play(BUZZER_TONE_START);
 
     for (;;)
     {
         const uint32_t now_tick = osKernelGetTickCount();
+        const cal_session_state_t previous_state = cal_session_state(&calibration_session);
         cal_status_t status;
 
-        if (!Calib_ReadImu(gyro, accel, &sensor_temp_c)) return false;
+        Calib_ReadImu(gyro, accel, &sensor_temp_c);
         if (heater_update_due || (float)(now_tick - last_heater_tick) * 0.001f >= HEATER_CONTROL_PERIOD_S)
         {
+            /* 首次更新间隔为 0，至少按 1ms 计算避免 PID 微分除零 */
             const uint32_t elapsed_ticks = now_tick - last_heater_tick;
-            if (!Pwm_HeaterUpdate(sensor_temp_c,
-                                  (float)(elapsed_ticks ? elapsed_ticks : 1U) * 0.001f))
-            {
-                return false;
-            }
+            if (!heater_update(sensor_temp_c, (float)(elapsed_ticks ? elapsed_ticks : 1U) * 0.001f)) return false;
             last_heater_tick = now_tick;
             heater_update_due = false;
         }
 
-        status = cal_session_push(&calibration_session, now_tick, gyro, accel,
-                                  Calib_IsAccelReady(), sensor_temp_c);
+        status = cal_session_push(&calibration_session, now_tick, gyro, accel, Calib_IsAccelReady(), sensor_temp_c);
+        if (previous_state == CAL_SESSION_WARMUP && cal_session_state(&calibration_session) == CAL_SESSION_SAMPLE)
+        {
+            buzzer_play(BUZZER_TONE_STEP_DONE);
+        }
         if (status == CAL_OK)
         {
             const gyro_bias_t *result = cal_session_result(&calibration_session);
-            if (!result) return false;
             for (uint32_t axis = 0U; axis < CAL_AXES; ++axis) calibrated_bias[axis] = result->bias[axis];
             calibrated_sigma = fmaxf(result->sigma, GYRO_SIGMA_MIN);
             calibration_ready = true;

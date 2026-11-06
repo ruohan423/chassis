@@ -19,7 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "crc.h"
+#include "can.h"
 #include "dma.h"
 #include "spi.h"
 #include "tim.h"
@@ -29,6 +29,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "BMI088driver.h"
+#include "user_dwt.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,12 +62,6 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void DWT_Init(void)
-{
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  DWT->CYCCNT = 0;
-  DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
 /* USER CODE END 0 */
 
 /**
@@ -93,17 +88,19 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  DWT_Init();
+  (void)dwt_init();
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
-  MX_CRC_Init();
   MX_SPI1_Init();
   MX_TIM10_Init();
   MX_USART3_UART_Init();
   MX_TIM4_Init();
+  MX_CAN1_Init();
+  MX_CAN2_Init();
+  MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   while(BMI088_init());
   /* USER CODE END 2 */

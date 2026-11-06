@@ -71,10 +71,6 @@ typedef enum {
 
 extern RC_Ctl_t rc_data;
 
-extern volatile uint32_t remote_uart_error_count;
-extern volatile uint32_t remote_frame_invalid_count;
-extern volatile uint32_t remote_dma_overrun_count;
-
 /* 回调函数指针类型 */
 typedef void (*RemoteControlCallback)(Remote *rc);
 typedef void (*MouseKeyControlCallback)(Mouse *mouse, Key_t key, Key_t lastkey);

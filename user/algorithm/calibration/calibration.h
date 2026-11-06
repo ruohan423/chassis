@@ -62,7 +62,6 @@ typedef struct
     uint32_t start_ms;
     uint32_t last_ms;
     bool has_time;
-    bool rejected;
 } gyro_cal_t;
 
 /* 初始化空的静止陀螺仪校准窗口。 */

@@ -1,23 +1,9 @@
-//
-// Created by mot on 2026/10/13.
-//
-
 #include "remote.h"
-#include <stddef.h>
-#include <string.h>
 
 RC_Ctl_t rc_data = {.rc = {1024, 1024, 1024, 1024, 1, 1}};
 
-volatile uint32_t remote_uart_error_count;
-volatile uint32_t remote_frame_invalid_count;
-volatile uint32_t remote_dma_overrun_count;
-
 #define REMOTE_CHANNEL_MIN 200U
 #define REMOTE_CHANNEL_MAX 1800U
-#define REMOTE_CHANNEL_MAX_STEP 900U
-
-static bool remote_has_previous_frame;
-static uint16_t remote_previous_channels[4];
 
 /* 默认空实现 */
 static void remote_control_default(Remote *rc) {
@@ -58,67 +44,19 @@ void remote_clear(void) {
 
     rc_data.key.value     = 0;
     rc_data.lastkey.value = 0;
-    remote_has_previous_frame = false;
 }
 
-bool remote_frame_is_valid(const uint8_t *RxMsg) {
-    uint16_t ch0;
-    uint16_t ch1;
-    uint16_t ch2;
-    uint16_t ch3;
-    uint8_t s1;
-    uint8_t s2;
-    uint16_t channels[4];
-    uint8_t index;
+bool remote_frame_is_valid(const uint8_t *RxMsg)
+{
+    uint16_t ch0 = (uint16_t)((RxMsg[0] | (RxMsg[1] << 8)) & 0x07FFU);
+    uint16_t ch1 = (uint16_t)(((RxMsg[1] >> 3) | (RxMsg[2] << 5)) & 0x07FFU);
+    uint16_t ch2 = (uint16_t)(((RxMsg[2] >> 6) | (RxMsg[3] << 2) | (RxMsg[4] << 10)) & 0x07FFU);
+    uint16_t ch3 = (uint16_t)(((RxMsg[4] >> 1) | (RxMsg[5] << 7)) & 0x07FFU);
 
-    if (RxMsg == NULL) {
-        return false;
-    }
-
-    ch0 = (uint16_t)((RxMsg[0] | (RxMsg[1] << 8)) & 0x07FFU);
-    ch1 = (uint16_t)(((RxMsg[1] >> 3) | (RxMsg[2] << 5)) & 0x07FFU);
-    ch2 = (uint16_t)(((RxMsg[2] >> 6) | (RxMsg[3] << 2) | (RxMsg[4] << 10)) & 0x07FFU);
-    ch3 = (uint16_t)(((RxMsg[4] >> 1) | (RxMsg[5] << 7)) & 0x07FFU);
-    s1 = (uint8_t)((RxMsg[5] >> 6) & 0x03U);
-    s2 = (uint8_t)((RxMsg[5] >> 4) & 0x03U);
-
-    /*
-     * DBUS has no sync byte or CRC.  These checks reject most one-byte
-     * misalignments while keeping the valid stick range unrestricted.
-     */
-    if (!((ch0 >= REMOTE_CHANNEL_MIN) && (ch0 <= REMOTE_CHANNEL_MAX)
+    return (ch0 >= REMOTE_CHANNEL_MIN) && (ch0 <= REMOTE_CHANNEL_MAX)
         && (ch1 >= REMOTE_CHANNEL_MIN) && (ch1 <= REMOTE_CHANNEL_MAX)
         && (ch2 >= REMOTE_CHANNEL_MIN) && (ch2 <= REMOTE_CHANNEL_MAX)
-        && (ch3 >= REMOTE_CHANNEL_MIN) && (ch3 <= REMOTE_CHANNEL_MAX)
-        && (s1 >= 1U) && (s1 <= 3U)
-        && (s2 >= 1U) && (s2 <= 3U)
-        && (RxMsg[12] <= 1U)
-        && (RxMsg[13] <= 1U)
-        && (RxMsg[16] == 0U)
-        && (RxMsg[17] == 0U))) {
-        return false;
-    }
-
-    channels[0] = ch0;
-    channels[1] = ch1;
-    channels[2] = ch2;
-    channels[3] = ch3;
-
-    if (remote_has_previous_frame) {
-        for (index = 0U; index < 4U; index++) {
-            uint16_t delta = (channels[index] > remote_previous_channels[index])
-                ? (channels[index] - remote_previous_channels[index])
-                : (remote_previous_channels[index] - channels[index]);
-
-            if (delta > REMOTE_CHANNEL_MAX_STEP) {
-                return false;
-            }
-        }
-    }
-
-    memcpy(remote_previous_channels, channels, sizeof(remote_previous_channels));
-    remote_has_previous_frame = true;
-    return true;
+        && (ch3 >= REMOTE_CHANNEL_MIN) && (ch3 <= REMOTE_CHANNEL_MAX);
 }
 
 void remote_rx(unsigned char *RxMsg) {
@@ -156,7 +94,6 @@ void remote_rx(unsigned char *RxMsg) {
         default:
             break;
     }
-
     /* 保存上一帧状态 */
     rc_data.mouse.last_press_l = rc_data.mouse.press_l;
     rc_data.mouse.last_press_r = rc_data.mouse.press_r;

@@ -49,14 +49,11 @@ typedef struct
 /* 填充 BMI088/Rust 兼容的预热和静止校准默认配置。 */
 void cal_session_default(cal_session_cfg_t *config);
 
-/* 初始化会话；配置无效时会话保持失败状态。 */
+/* 初始化会话。 */
 void cal_session_init(cal_session_t *session, const cal_session_cfg_t *config);
 
 /* 启动温度预热和静止采集流程。 */
-bool cal_session_start(cal_session_t *session);
-
-/* 取消活动会话并返回空闲状态。 */
-void cal_session_cancel(cal_session_t *session);
+void cal_session_start(cal_session_t *session);
 
 /* 向当前会话输入一个国际单位制 IMU 样本。 */
 cal_status_t cal_session_push(cal_session_t *session, uint32_t time_ms, const float gyr[CAL_AXES],
@@ -65,7 +62,7 @@ cal_status_t cal_session_push(cal_session_t *session, uint32_t time_ms, const fl
 /* 返回当前会话状态。 */
 cal_session_state_t cal_session_state(const cal_session_t *session);
 
-/* 仅当会话完成后返回校准结果。 */
+/* 返回校准结果，仅在 cal_session_push 返回 CAL_OK 后有效。 */
 const gyro_bias_t *cal_session_result(const cal_session_t *session);
 
 #endif
