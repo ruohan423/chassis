@@ -1,0 +1,215 @@
+rmcs_executor:
+  ros__parameters:
+    update_rate: 1000.0
+    components:
+      - rmcs_core::hardware::Flight -> flight_hardware
+      - rmcs_core::hardware::Px4VisionBridge -> px4_vision_bridge
+
+      - rmcs_core::controller::gimbal::SimpleGimbalController -> gimbal_controller
+      - rmcs_core::controller::pid::ErrorPidController -> yaw_angle_pid_controller
+      - rmcs_core::controller::pid::PidController -> yaw_velocity_pid_controller
+      - rmcs_core::controller::pid::ErrorPidController -> pitch_angle_pid_controller
+
+      - rmcs_core::controller::shooting::FrictionWheelController -> friction_wheel_controller
+      - rmcs_core::controller::shooting::HeatController -> heat_controller
+      - rmcs_core::controller::shooting::BulletFeederController17mm -> bullet_feeder_controller
+      - rmcs_core::controller::pid::PidController -> left_friction_velocity_pid_controller
+      - rmcs_core::controller::pid::PidController -> right_friction_velocity_pid_controller
+      - rmcs_core::controller::pid::PidController -> bullet_feeder_velocity_pid_controller
+
+      - rmcs_core::referee::command::Interaction -> referee_interaction
+      - rmcs_core::referee::Command -> referee_command
+      - rmcs_core::referee::Status -> referee_status
+      - rmcs_core::referee::command::interaction::Ui -> referee_ui
+      - rmcs_core::referee::app::ui::Flight -> referee_ui_flight
+      - rmcs_core::referee::app::ui::AutoAimUi -> auto_aim_ui
+
+      # - rmcs_core::broadcaster::ValueBroadcaster -> value_broadcaster
+      # - rmcs_core::broadcaster::TfBroadcaster -> tf_broadcaster
+
+      - rmcs::AutoAimCapturerComponent -> auto_aim_capturer
+      # - rmcs::AutoAimPlayerComponent -> auto_aim_player
+      - rmcs::AutoAimRecorderComponent -> auto_aim_recorder
+      - rmcs::AutoAimComponent -> auto_aim_component
+
+auto_aim_capturer:
+  ros__parameters:
+    camera_name: ""
+    exposure_us: 3000.0
+    gain: 8.0
+    framerate: 120.0
+    invert_image: false
+    rls_tau_sec: 10.0
+    use_hardware_sync: false
+    delay_ms: 6.5
+
+auto_aim_recorder:
+  ros__parameters:
+    output_path: "/tmp/autoaim/records"
+    queue_depth: 16
+    flush_every_n_frames: 64
+    max_duration_seconds: 0
+    max_videos_size_gb: 0.0
+
+auto_aim_component:
+  ros__parameters:
+    # WARN: 危险！可选 red | blue，生效后裁判系统 ID 缺席时
+    # 将强行绑定为对应阵营哨兵，仅供调试，严禁比赛启用。
+    # 留空或填 unknow 表示禁用。
+    dangerous_fallback: ""
+    manual_shoot: true
+    enable_rune: false
+    camera_translation: [0.10238, 0.0, 0.05286]
+    fire_control:
+      bullet_speed: 22.5
+      shoot_delay: 0.05
+      offset_yaw: +1.3 #越大越左
+      offset_pitch: +1.7 #越大越下
+      attack_window: 80.0
+      degraded_angle_speed: 12.0
+      window_redundancy: 0.8
+      window_hysteresis: 0.2
+      is_lazy_gimbal: false
+      attack_preaim: false
+      require_stable_command: false
+      yaw_tolerance: 0.07
+      pitch_tolerance: 0.04
+      rune_idle_duration: 0.4
+      rune_shoot_duration: 0.2
+
+px4_vision_bridge:
+  ros__parameters:
+    source_topic: /odin1/odometry_highfreq
+    system_id: 1 # 与 PX4 MAV_SYS_ID 一致
+    component_id: 197 # MAV_COMP_ID_VISUAL_INERTIAL_ODOMETRY
+    max_send_rate_hz: 50.0
+    # 挂载角(ZYX, rad): 传感器系->机体系, 初值 roll=π pitch=π/2 yaw=0
+    mount_rpy: [3.14159265358979, 1.5707963267949, 0.0]
+    # Odin1 自启看门狗: 里程计断流超过 timeout 秒且距上次拉起超过 cooldown 秒
+    # 才执行 tmux-launch.sh; 数据正常时不会重启 Odin1 (保住 SLAM 预热)
+    odin_autostart: true
+    odin_watchdog_timeout: 10.0
+    odin_restart_cooldown: 60.0 # 需覆盖 SLAM 预热 30~60s
+
+value_broadcaster:
+  ros__parameters:
+    forward_list:
+      - /gimbal/pitch/angle
+      - /gimbal/pitch/velocity
+      - /gimbal/pitch/torque
+      - /gimbal/pitch/control_angle_error
+      - /gimbal/pitch/control_velocity
+      - /gimbal/pitch/velocity_imu
+
+      - /gimbal/yaw/angle
+      - /gimbal/yaw/velocity
+      - /gimbal/yaw/torque
+      - /gimbal/yaw/control_torque
+      - /gimbal/yaw/control_angle_error
+      - /gimbal/yaw/velocity_imu
+      - /gimbal/bullet_feeder/velocity
+
+tf_broadcaster:
+  ros__parameters:
+    tf: /tf
+
+flight_hardware:
+  ros__parameters:
+    board_serial: "AF-7C58-5458-E731-9F74-1F9C-CAFD-30AF-9C09"
+    yaw_motor_zero_point: 11720
+    pitch_motor_zero_point: 18578
+
+referee_status:
+  ros__parameters:
+    path: /dev/tty0
+
+gimbal_controller:
+  ros__parameters:
+    upper_limit: -0.39518 # -0.39518 rad ≈ -22.6°
+    lower_limit: 0.7 # 0.7 rad ≈ 40.1°
+    yaw_lower_limit: 0.1745
+    yaw_upper_limit: 2.5708
+
+yaw_angle_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/yaw/control_angle_error
+    control: /gimbal/yaw/control_velocity
+    kp: 15.0
+    ki: 0.0
+    kd: 0.0
+
+yaw_velocity_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/yaw/velocity_imu
+    setpoint: /gimbal/yaw/control_velocity
+    control: /gimbal/yaw/control_torque
+    kp: 6.0
+    ki: 0.0
+    kd: 0.0
+
+pitch_angle_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/pitch/control_angle_error
+    control: /gimbal/pitch/control_velocity
+    kp: 10.0
+    ki: 0.0
+    kd: 0.0
+
+friction_wheel_controller:
+  ros__parameters:
+    friction_wheels:
+      - /gimbal/left_friction
+      - /gimbal/right_friction
+    friction_velocities:
+      - 620.0
+      - 620.0
+    friction_soft_start_stop_time: 1.0
+
+heat_controller:
+  ros__parameters:
+    heat_per_shot: 10000
+    reserved_heat: 15000
+
+bullet_feeder_controller:
+  ros__parameters:
+    bullets_per_feeder_turn: 8.0
+    shot_frequency: 20.0
+    safe_shot_frequency: 10.0
+    eject_frequency: 10.0
+    eject_time: 0.05
+    deep_eject_frequency: 5.0
+    deep_eject_time: 0.2
+    single_shot_max_stop_delay: 2.0
+
+left_friction_velocity_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/left_friction/velocity
+    setpoint: /gimbal/left_friction/control_velocity
+    control: /gimbal/left_friction/control_torque
+    kp: 0.003436926
+    ki: 0.00
+    kd: 0.009373434
+
+right_friction_velocity_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/right_friction/velocity
+    setpoint: /gimbal/right_friction/control_velocity
+    control: /gimbal/right_friction/control_torque
+    kp: 0.003436926
+    ki: 0.00
+    kd: 0.009373434
+
+bullet_feeder_velocity_pid_controller:
+  ros__parameters:
+    measurement: /gimbal/bullet_feeder/velocity
+    setpoint: /gimbal/bullet_feeder/control_velocity
+    control: /gimbal/bullet_feeder/control_torque
+    kp: 0.583
+    ki: 0.0
+    kd: 0.0
+
+auto_aim_ui:
+  ros__parameters:
+    offset_x: 0.000
+    offset_y: 0.000
+    offset_z: 0.000
