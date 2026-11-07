@@ -112,6 +112,7 @@ void Power_Task(void *argument);
 void Judge_Task(void *argument);
 void Chassis_Task(void *argument);
 
+extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
 /**
@@ -185,6 +186,8 @@ void MX_FREERTOS_Init(void) {
 /* USER CODE END Header_INS_Task */
 __weak void INS_Task(void *argument)
 {
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN INS_Task */
   /* Infinite loop */
   for(;;)
