@@ -22,12 +22,12 @@ extern volatile chassis_mode_t actChassis;
 
 /* 给任务提供初始化、行为目标生成和控制周期接口。
  * 输入已换算为 m/s、deg，时钟来自 CMSIS-OS2。
- * 初始化/下发失败返回 false，调用任务负责延时和重试。 */
-bool chassis_init(uint32_t now_tick, uint32_t tick_frequency_hz);
+ * period_ticks 是任务实际周期，用于统一 PID 采样时间；初始化/下发失败由任务延时重试。 */
+bool chassis_init(uint32_t now_tick, uint32_t tick_frequency_hz, uint32_t period_ticks);
 bool chassis_update(float input_x, float input_y, float gimbal_angle_deg, bool gimbal_valid, uint32_t now_tick);
 
-/* 创建任务前初始化功率状态；功率任务启动延时后重新设置积分起点。 */
-void chassis_power_init(uint32_t now_tick, uint32_t tick_frequency_hz);
+/* 由功率任务初始化功率状态；启动延时后重新设置积分起点。 */
+void chassis_power_init(uint32_t now_tick, uint32_t tick_frequency_hz, uint32_t period_ticks);
 void chassis_power_start(uint32_t now_tick);
 void chassis_power_update(uint32_t now_tick);
 

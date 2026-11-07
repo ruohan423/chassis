@@ -1,3 +1,9 @@
+/* CubeMX 创建说明：仅上板电机调试时由用户创建，不用于常规底盘运行。
+ * 名称 motor_test_task，入口 MotorTest_Task，优先级 osPriorityAboveNormal，栈 1024 字节。
+ * 若界面以 32 位字填写栈大小，填 256；当前周期要求内核时钟为 1000 Hz。
+ * 无独立信号量；入口初始化电机和 CAN，不再提供自动创建线程的启动函数。
+ * 与底盘共用同一 CAN 接收分发或电机控制组时，禁止同时启用两个任务。
+ */
 #include "motor_test_task.h"
 
 #include "can.h"
@@ -6,8 +12,8 @@
 #include "pid.h"
 #include "user_can.h"
 
-#define MOTOR_TEST_PERIOD_MS 2U
-#define MOTOR_TEST_ENABLE_RM3508 0U
+#define MOTOR_TEST_PERIOD_MS 2U        /* 电机上板调试控制周期，单位 ms。 */
+#define MOTOR_TEST_RETRY_MS 100U       /* CAN 启动失败后的重试间隔，单位 ms。 */
 
 static void receive_motor_feedback(CAN_HandleTypeDef *handle, const user_can_frame_t *frame);
 
@@ -22,7 +28,7 @@ volatile test_config_t motor_config = {
     .position_ki = 0.0f,
     .position_kd = 12.0f,
     .position_integral_limit = 5000.0f,
-    .sample_period_s = 0.002f,
+    .sample_period_s = (float)MOTOR_TEST_PERIOD_MS * 0.001f,
     .output_limit = RM3508_LIMIT,
 };
 
@@ -36,7 +42,6 @@ typedef struct
 } motor_state_t;
 
 static motor_state_t motor_state;
-static osThreadId_t test_task_id;
 static RM3508_TypeDef rm3508_feedback;
 static GM6020_TypeDef gm6020_feedback;
 static M2006_TypeDef m2006_feedback;
@@ -47,15 +52,9 @@ static DM4310_TypeDef dm4310_feedback;
 
 
 
-static const osThreadAttr_t motor_test_task_attributes = {
-    .name = "motor_test_task",
-    .stack_size = 256U * 4U,
-    .priority = osPriorityAboveNormal,
-};
-
-bool MotorTest_TaskStart(void)
+void MotorTest_Task(void *argument)
 {
-    if (test_task_id != NULL){return false;}
+    (void)argument;
 
     pid_dom_init(&motor_state.position_pid, motor_config.position_kp,
                  motor_config.position_ki, motor_config.position_kd,
@@ -76,19 +75,11 @@ bool MotorTest_TaskStart(void)
 
     user_can_register_rx_callback(motor_config.can_handle, receive_motor_feedback);
 
-    if (!user_can_start(motor_config.can_handle)){return false;}
-
-    test_task_id = osThreadNew(MotorTest_Task, NULL, &motor_test_task_attributes);
-
-    return test_task_id != NULL;
-}
-
-void MotorTest_Task(void *argument)
-{
-    uint32_t next_tick;
-
-    (void)argument;
-    next_tick = osKernelGetTickCount();
+    while (!user_can_start(motor_config.can_handle))
+    {
+        osDelay(MOTOR_TEST_RETRY_MS);
+    }
+    uint32_t next_tick = osKernelGetTickCount();
 
     for (;;)
     {

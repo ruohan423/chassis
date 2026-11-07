@@ -5,6 +5,8 @@
 
 #include "calibration.h"
 
+void Calib_Task(void *argument);
+/* 通知用户已创建的校准线程，不创建线程；仅由 INS 启动流程调用一次。 */
 bool Calib_TaskStart(void);
 bool Calib_IsReady(void);
 bool Calib_IsFailed(void);

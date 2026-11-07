@@ -55,45 +55,6 @@ static uint8_t isAllMotorConnected(void)
     return 1U;
 }
 
-/* ---------------- Manager::Manager ---------------- */
-void Manager_construct(Manager *m, Division division_, RLSEnabled rlsEnabled_,
-                       float k1_, float k2_, float k3_, float lambda_)
-{
-    float initParams[2];
-    m->rlsEnabled             = rlsEnabled_;
-    m->error                  = 0U;
-    m->division               = division_;
-    m->powerBuff              = 0.0f;
-    m->fullBuffSet            = 0.0f;
-    m->baseBuffSet            = 0.0f;
-    m->fullMaxPower           = 0.0f;
-    m->baseMaxPower           = 0.0f;
-    m->powerUpperLimit        = 0.0f;
-    m->refereeMaxPower        = 0.0f;
-    m->userConfiguredMaxPower = 0.0f;
-    m->callback               = NULL;
-    m->measuredPower          = 0.0f;
-    m->estimatedPower         = 0.0f;
-    m->estimatedCapEnergy     = 0.0f;
-    m->torqueConst            = 0.0f;
-    m->k1                     = k1_;
-    m->k2                     = k2_;
-    m->k3                     = k3_;
-    m->lastUpdateTick         = 0;
-    m->tick_frequency_hz      = 0U;
-    m->motor_hold_ticks       = 0U;
-    m->sample_period_s        = 0.0f;
-    RLS_construct(&m->rls, CHASSIS_POWER_RLS_DELTA, lambda_);
-
-    assert(k1_ >= 0);
-    assert(k2_ >= 0);
-    assert(k3_ >= 0);
-
-    initParams[0] = k1_;
-    initParams[1] = k2_;
-    RLS_setParamVector(&m->rls, initParams);
-}
-
 /* ---------------- 小接口 ---------------- */
 void Power_setMaxPowerConfigured(float maxPower)
 {
@@ -438,15 +399,42 @@ void Power_daemonStep(uint32_t now)
     /* vTaskDelay(pdMS_TO_TICKS(1)); 由调用方任务负责 */
 }
 
-/* ---------------- init ---------------- */
-void Power_init(const Manager *mana, const PowerFeedbackSources *src)
+/* ---------------- 初始化 ---------------- */
+void power_controller_init(uint32_t tick_frequency_hz, uint32_t period_ticks, const PowerFeedbackSources *src)
 {
     if (isInitialized)
+    {
         return;
-    manager = *mana;
+    }
+
+    manager.rlsEnabled = (RLSEnabled)CHASSIS_POWER_RLS_ENABLED;
+    manager.error = 0U;
+    manager.division = (Division)CHASSIS_POWER_DIVISION;
+    manager.powerBuff = 0.0f;
+    manager.fullBuffSet = 0.0f;
+    manager.baseBuffSet = 0.0f;
+    manager.fullMaxPower = 0.0f;
+    manager.baseMaxPower = 0.0f;
+    manager.refereeMaxPower = 0.0f;
+    manager.userConfiguredMaxPower = 0.0f;
+    manager.callback = NULL;
+    manager.measuredPower = 0.0f;
+    manager.estimatedPower = 0.0f;
+    manager.estimatedCapEnergy = 0.0f;
+    manager.torqueConst = 0.0f;
+    manager.k1 = CHASSIS_POWER_K1;
+    manager.k2 = CHASSIS_POWER_K2;
+    manager.k3 = CHASSIS_POWER_K3_W;
+    manager.lastUpdateTick = 0U;
+    manager.tick_frequency_hz = tick_frequency_hz;
+    manager.motor_hold_ticks = (tick_frequency_hz * CHASSIS_POWER_MOTOR_HOLD_MS + 999U) / 1000U;
+    manager.sample_period_s = (float)period_ticks / (float)tick_frequency_hz;
+    RLS_construct(&manager.rls, CHASSIS_POWER_RLS_DELTA, CHASSIS_POWER_RLS_LAMBDA);
+    const float init_params[2] = {CHASSIS_POWER_K1, CHASSIS_POWER_K2};
+    RLS_setParamVector(&manager.rls, init_params);
     sources = *src;
 
-    /* default value */
+    /* 设置裁判等级与功率预算的初始值。 */
     LATEST_FEEDBACK_JUDGE_ROBOT_LEVEL = manager.division == SENTRY ? CHASSIS_POWER_LEVEL_COUNT : 1U;
     MIN_MAXPOWER_CONFIGURED           = CHASSIS_POWER_INITIAL_MIN_W;
     manager.powerUpperLimit           = CHASSIS_POWER_CAP_RUNOUT_THRESHOLD_W + CHASSIS_POWER_CAP_MAX_OUTPUT_W;

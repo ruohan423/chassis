@@ -1,3 +1,9 @@
+/* CubeMX 创建说明：CAL_ON_STARTUP 非零时由用户创建一次性校准线程。
+ * 名称 calib_task，入口 Calib_Task，句柄 calib_taskHandle，优先级 osPriorityAboveNormal。
+ * 栈 2048 字节；若界面以 32 位字填写栈大小，填 512。
+ * 入口先等待线程标志，由 INS 的 Calib_TaskStart 通知；无需独立信号量。
+ * CAL_ON_STARTUP 为零时无需创建；校准结束后本线程退出，不与 INS 并发读传感器。
+ */
 #include "calib_task.h"
 
 #include <math.h>
@@ -18,38 +24,26 @@ static float sensor_temp_c;
 static cal_session_cfg_t calibration_config;
 static cal_session_t calibration_session;
 
-static const osThreadAttr_t calib_task_attributes = {
-    .name = "calib_task",
-    .stack_size = 512U * 4U,
-    .priority = osPriorityAboveNormal,
-};
+#define CALIB_START_FLAG 1U  /* 通知已创建的校准线程开始一次启动校准。 */
 
-static void Calib_Task(void *argument);
+#if CAL_ON_STARTUP != 0U
+extern osThreadId_t calib_taskHandle;
+#endif
+
 static bool run_gyro_cal(void);
 
-/* 只在 INS 任务启动阶段调用一次；校准任务退出后 INS 才开始读 IMU，两者不并发 */
-bool Calib_TaskStart(void)
-{
-    calibration_ready = false;
-    calibration_failed = false;
-    if (osThreadNew(Calib_Task, NULL, &calib_task_attributes) == NULL)
-    {
-        calibration_failed = true;
-        return false;
-    }
-    return true;
-}
-
-static void Calib_Task(void *argument)
+void Calib_Task(void *argument)
 {
     (void)argument;
-    if (!heater_init() || !buzzer_init())
+    calibration_ready = false;
+    calibration_failed = false;
+
+    const uint32_t flags = osThreadFlagsWait(CALIB_START_FLAG, osFlagsWaitAny, osWaitForever);
+    if ((flags & osFlagsError) != 0U || !heater_init() || !buzzer_init())
     {
         calibration_failed = true;
-        osThreadExit();
     }
-
-    if (run_gyro_cal())
+    else if (run_gyro_cal())
     {
         buzzer_play(BUZZER_TONE_SUCCESS);
     }
@@ -59,8 +53,20 @@ static void Calib_Task(void *argument)
         buzzer_play(BUZZER_TONE_ERROR);
         heater_stop();
     }
-
+#if CAL_ON_STARTUP != 0U
+    calib_taskHandle = NULL;
+#endif
     osThreadExit();
+}
+
+/* 仅在 INS 启动阶段调用一次；校准采样完成后 INS 才开始读 IMU。 */
+bool Calib_TaskStart(void)
+{
+#if CAL_ON_STARTUP != 0U
+    return (osThreadFlagsSet(calib_taskHandle, CALIB_START_FLAG) & osFlagsError) == 0U;
+#else
+    return false;
+#endif
 }
 
 bool Calib_IsReady(void)

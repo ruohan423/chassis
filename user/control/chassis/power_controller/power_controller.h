@@ -60,10 +60,6 @@ typedef struct {
     RLS rls;
 } Manager;
 
-/* lambda_ 为实际使用的遗忘因子；初始协方差由统一配置中的 delta 给出。 */
-void Manager_construct(Manager *m, Division division_, RLSEnabled rlsEnabled_,
-                       float k1_, float k2_, float k3_, float lambda_);
-
 typedef struct {
     float pidOutput;     /* torque current command, [-maxOutput, maxOutput], no unit */
     float curAv;         /* Measured angular velocity, rad/s */
@@ -86,7 +82,8 @@ typedef struct {
 float  Power_getLatestFeedbackJudgePowerLimit(void);
 float *Power_getControlledOutput(PowerObj *objs[4]);
 const volatile PowerStatus *Power_getPowerStatus(void);
-void   Power_init(const Manager *manager, const PowerFeedbackSources *sources);
+/* 直接初始化模块内状态；时钟频率单位 Hz，采样周期单位 tick。 */
+void power_controller_init(uint32_t tick_frequency_hz, uint32_t period_ticks, const PowerFeedbackSources *sources);
 void   Power_setMaxPowerConfigured(float maxPower);
 void   Power_setMode(uint8_t mode);
 void   Power_registerPowerCallbackFunc(float (*callback)(void));

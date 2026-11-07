@@ -1,0 +1,8 @@
+//
+// Created by mot on 2026/11/7.
+//
+
+#ifndef SENTRY_CHASSIS_USB_COMMON_H
+#define SENTRY_CHASSIS_USB_COMMON_H
+
+#endif //SENTRY_CHASSIS_USB_COMMON_H

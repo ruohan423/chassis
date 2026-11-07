@@ -1,3 +1,9 @@
+/* CubeMX 创建说明：由用户创建常驻线程及二值信号量。
+ * 线程名称 judge_task，入口 Judge_Task，优先级 osPriorityNormal，栈 2048 字节。
+ * 若界面以 32 位字填写栈大小，填 512。
+ * 二值信号量名称 JudgeSem，最大值 1、初值 0，生成句柄必须为 JudgeSemHandle。
+ * 复用 USART6：RX DMA Circular、TX DMA Normal；USART/DMA 中断优先级为 5。
+ */
 #include "judge_task.h"
 
 #include "cmsis_os2.h"
@@ -40,6 +46,9 @@ void Judge_Task(void *argument)
 
     judge_clear();
     bool uart_started = uart_rx_start(&judge_uart_rx);
+#if STACK_TEST_ENABLED
+    StackTest_Record(STACK_TEST_JUDGE);
+#endif
 
     for (;;)
     {
@@ -82,6 +91,9 @@ void Judge_Task(void *argument)
         }
 
         process_transmit(osKernelGetTickCount(), tick_frequency);
+#if STACK_TEST_ENABLED
+        StackTest_Record(STACK_TEST_JUDGE);
+#endif
     }
 }
 
@@ -153,8 +165,8 @@ static void process_transmit(uint32_t now_tick, uint32_t tick_frequency)
         pending = true;
         const int32_t previous_lock = osKernelLock();
         judge_tx_status.result = JUDGE_TX_QUEUED;
-        judge_tx_status.data_cmd_id = request.interaction.data_cmd_id;
-        judge_tx_status.receiver_id = request.interaction.receiver_id;
+        judge_tx_status.data_cmd_id = request.data_cmd_id;
+        judge_tx_status.receiver_id = request.receiver_id;
         judge_tx_status.sequence = sequence;
         if (previous_lock == 0)
         {

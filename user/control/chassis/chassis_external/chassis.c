@@ -9,17 +9,20 @@ volatile chassis_mode_t actChassis = CHASSIS_NORMAL;
 static pid_position_t speed_pid[CHASSIS_MOTOR_COUNT];
 static ChassisController controller;
 static pid_position_t follow_pid;
+#if USE_POWER_CONTROLLER
+/* 功率任务完成首轮计算前，底盘保持零输出，避免依赖任务创建和运行顺序。 */
+static volatile bool power_ready;
+#endif
 
 static bool update_target(float input_x, float input_y, float gimbal_angle_deg, bool gimbal_valid, Dynamics *target);
 
-bool chassis_init(uint32_t now_tick, uint32_t tick_frequency_hz)
+bool chassis_init(uint32_t now_tick, uint32_t tick_frequency_hz, uint32_t period_ticks)
 {
     if (!chassis_port_init())
     {
         return false;
     }
 
-    const uint32_t period_ticks = (tick_frequency_hz * CHASSIS_CONTROL_PERIOD_MS + 999U) / 1000U;
     const float sample_period_s = (float)period_ticks / (float)tick_frequency_hz;
     for (uint32_t index = 0U; index < CHASSIS_MOTOR_COUNT; index++)
     {
@@ -47,6 +50,13 @@ bool chassis_init(uint32_t now_tick, uint32_t tick_frequency_hz)
 
 bool chassis_update(float input_x, float input_y, float gimbal_angle_deg, bool gimbal_valid, uint32_t now_tick)
 {
+#if USE_POWER_CONTROLLER
+    if (!power_ready)
+    {
+        ChassisController_stop(&controller, now_tick);
+        return chassis_port_send();
+    }
+#endif
     Dynamics target;
     if (update_target(input_x, input_y, gimbal_angle_deg, gimbal_valid, &target))
     {
@@ -66,21 +76,17 @@ bool chassis_update(float input_x, float input_y, float gimbal_angle_deg, bool g
     return true;
 }
 
-void chassis_power_init(uint32_t now_tick, uint32_t tick_frequency_hz)
+void chassis_power_init(uint32_t now_tick, uint32_t tick_frequency_hz, uint32_t period_ticks)
 {
 #if USE_POWER_CONTROLLER
-    Manager manager;
-    Manager_construct(&manager, (Division)CHASSIS_POWER_DIVISION, (RLSEnabled)CHASSIS_POWER_RLS_ENABLED,
-                      CHASSIS_POWER_K1, CHASSIS_POWER_K2, CHASSIS_POWER_K3_W, CHASSIS_POWER_RLS_LAMBDA);
-    manager.tick_frequency_hz = tick_frequency_hz;
-    manager.motor_hold_ticks = (tick_frequency_hz * CHASSIS_POWER_MOTOR_HOLD_MS + 999U) / 1000U;
-    manager.sample_period_s = (float)((tick_frequency_hz * CHASSIS_POWER_PERIOD_MS + 999U) / 1000U) / (float)tick_frequency_hz;
-    Power_init(&manager, &chassis_power_sources);
+    power_ready = false;
+    power_controller_init(tick_frequency_hz, period_ticks, &chassis_power_sources);
     Power_setMode(CHASSIS_POWER_LIMIT_MODE);
     Power_daemonInit(now_tick);
 #else
     (void)now_tick;
     (void)tick_frequency_hz;
+    (void)period_ticks;
 #endif
 }
 
@@ -98,6 +104,7 @@ void chassis_power_update(uint32_t now_tick)
 #if USE_POWER_CONTROLLER
     chassis_port_update_feedback(now_tick);
     Power_daemonStep(now_tick);
+    power_ready = true;
 #else
     (void)now_tick;
 #endif

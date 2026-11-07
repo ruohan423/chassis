@@ -27,6 +27,16 @@ VQF 会把校准零偏作为初始先验，并继续进行运行时在线估计�
 - `CAL_ON_STARTUP == 0`：跳过启动校准，VQF 使用 `GYR_BIAS_X`、`GYR_BIAS_Y`、
   `GYR_BIAS_Z` 和 `GYR_BIAS_SIGMA` 宏中的固定值。
 
+## 线程创建
+
+线程由用户在 CubeMX 创建；具体属性见 `user/task/ins_task/ins_task.c` 和 `calib_task.c` 文件开头，不在 `freertos.c` 手写创建代码。
+
+- 姿态线程：名称 `ins_task`，入口 `INS_Task`，Normal 优先级，栈 2048 字节。
+- 当 `CAL_ON_STARTUP` 非零时，还需校准线程：名称 `calib_task`，入口 `Calib_Task`，句柄 `calib_taskHandle`，AboveNormal 优先级，栈 2048 字节。
+- 若 CubeMX 栈单位为 32 位字，两者均填 512；内核时钟保持 1000 Hz，与现有采样周期一致。
+
+校准线程启动后等待线程标志。`Calib_TaskStart()` 只通知用户已创建的线程，不创建线程；姿态线程等待校准结果，校准线程完成后退出。`CAL_ON_STARTUP` 为零时不必创建校准线程。
+
 ## 当前采样参数
 
 当前 BMI088 配置为陀螺仪 1000 Hz、加速度 400 Hz，`INS_Task()` 按 1 ms 周期运行。

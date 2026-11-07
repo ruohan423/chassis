@@ -1,75 +1,60 @@
 #ifndef SENTRY_CHASSIS_CHASSIS_CONFIG_H
-#define SENTRY_CHASSIS_CHASSIS_CONFIG_H  /* 本配置头文件的重复包含保护，不作调参项。 */
+#define SENTRY_CHASSIS_CHASSIS_CONFIG_H
 
-/* 统一配置入口。以下沿用当前工程值，不代表实车已标定。
- * 完成移植需要逐项核对：接线/方向 → 几何/换算 → 轮速环 → 跟随环 → 功率模型/能量环。
- * 具体数据来源、缺失输入与验证步骤见 CHASSIS_PORTING.md。 */
+/* 完成移植需要逐项核对：接线/方向 → 几何/换算 → 轮速环 → 跟随环 → 功率模型/能量环 */
 
 /* 底层适配：逻辑轮序固定为右前、左前、左后、右后。
  * CAN 总线选 1 或 2；当前为 CAN2。四个 ID 必须属于同一个四电机控制组。
  * 每轮方向只允许 +1 或 -1，同步作用于反馈速度、反馈力矩和输出指令。 */
 
-#define CHASSIS_CAN_BUS                   2U      /* 底盘电机使用的总线编号，1 为 CAN1、2 为 CAN2；须与实车接线和生成配置一致。 */
-#define CHASSIS_MOTOR_COUNT               4U      /* 底盘轮电机数量，单位为个；当前控制器和控制报文固定支持四轮，不能仅改此值扩展。 */
-#define CHASSIS_MOTOR_GROUP_FIRST_ID      1U      /* 四电机控制组的起始电机编号；当前组从 1 开始，须与控制报文和四轮编号配套。 */
-#define CHASSIS_MOTOR_COMMAND_ID          0x200U  /* 四轮电流指令的标准帧标识；当前为电调 1～4 号组，换组须核对电调协议。 */
-#define CHASSIS_MOTOR_FEEDBACK_ID_BASE    0x201U  /* 控制组首个电机的反馈标准帧标识；其余电机按组内编号差递增，须与电调协议一致。 */
-#define CHASSIS_RF_MOTOR_ID               1U      /* 逻辑右前轮的实际电机编号；四轮编号须互不重复并属于所选控制组。 */
-#define CHASSIS_LF_MOTOR_ID               2U      /* 逻辑左前轮的实际电机编号；四轮编号须互不重复并属于所选控制组。 */
-#define CHASSIS_LB_MOTOR_ID               3U      /* 逻辑左后轮的实际电机编号；四轮编号须互不重复并属于所选控制组。 */
-#define CHASSIS_RB_MOTOR_ID               4U      /* 逻辑右后轮的实际电机编号；四轮编号须互不重复并属于所选控制组。 */
-#define CHASSIS_RF_MOTOR_DIRECTION        1.0f    /* 右前轮安装方向系数，只取 +1 或 -1；同时变换反馈速度、反馈力矩和输出指令。 */
-#define CHASSIS_LF_MOTOR_DIRECTION        1.0f    /* 左前轮安装方向系数，只取 +1 或 -1；同时变换反馈速度、反馈力矩和输出指令。 */
-#define CHASSIS_LB_MOTOR_DIRECTION        1.0f    /* 左后轮安装方向系数，只取 +1 或 -1；同时变换反馈速度、反馈力矩和输出指令。 */
-#define CHASSIS_RB_MOTOR_DIRECTION        1.0f    /* 右后轮安装方向系数，只取 +1 或 -1；同时变换反馈速度、反馈力矩和输出指令。 */
-#define CHASSIS_MOTOR_FEEDBACK_TIMEOUT_MS 40U     /* 电机反馈在线判据的超时时间，单位 ms；超过该时长无反馈后对应输出清零。 */
-#define CHASSIS_CAN_RETRY_MS              100U    /* 总线初始化或发送失败后的任务重试等待时间，单位 ms；结合实际恢复时序确定。 */
+#define CHASSIS_CAN_BUS                   2U      /* 底盘电机使用的总线编号，1 为 CAN1、2 为 CAN2 */
+#define CHASSIS_MOTOR_COUNT               4U      /* 底盘轮电机数量*/
+#define CHASSIS_MOTOR_GROUP_FIRST_ID      1U      /* 四电机控制组的起始电机编号；当前组从 1 开始*/
+#define CHASSIS_MOTOR_COMMAND_ID          0x200U  /* 四轮电流指令的标准帧标识*/
+#define CHASSIS_MOTOR_FEEDBACK_ID_BASE    0x201U  /* 控制组首个电机的反馈标准帧标识*/
+#define CHASSIS_RF_MOTOR_ID               1U      /* 逻辑右前轮的实际电机编号 */
+#define CHASSIS_LF_MOTOR_ID               2U      /* 逻辑左前轮的实际电机编号*/
+#define CHASSIS_LB_MOTOR_ID               3U      /* 逻辑左后轮的实际电机编号*/
+#define CHASSIS_RB_MOTOR_ID               4U      /* 逻辑右后轮的实际电机编号*/
+#define CHASSIS_RF_MOTOR_DIRECTION        1.0f    /* 右前轮安装方向系数*/
+#define CHASSIS_LF_MOTOR_DIRECTION        1.0f    /* 左前轮安装方向系数*/
+#define CHASSIS_LB_MOTOR_DIRECTION        1.0f    /* 左后轮安装方向系数*/
+#define CHASSIS_RB_MOTOR_DIRECTION        1.0f    /* 右后轮安装方向系数*/
+#define CHASSIS_MOTOR_FEEDBACK_TIMEOUT_MS 40U     /* 电机反馈在线判据的超时时间，单位 ms */
 
-/* 当前仅实现四个同型号、同减速比的 M3508 + C620。换电机还需修改 port 层编解码。
+/* 当前实现四个同型号、同减速比的 M3508 + C620
  * KA 为转子侧 Nm/A；减速比为电机转速/轮侧转速。
  * C620 原始指令和电流反馈 ±16384 对应 ±20 A，需核对电调协议与实际限流。 */
-#define CHASSIS_MOTOR_KA_NM_PER_A                 0.0156f   /* 转子侧力矩常数，单位 Nm/A，不含减速比；当前参考值须按实际电机确认或标定。 */
-#define CHASSIS_MOTOR_REDUCTION_RATIO             19.0f     /* 电机侧转速与轮侧转速之比，无量纲且须大于零；用于转速和轮侧力矩换算。 */
-#define CHASSIS_MOTOR_CURRENT_FULL_SCALE_A        20.0f     /* 电调协议满量程对应的电流幅值，单位 A；属于物理刻度，不能随期望限流一起修改。 */
-#define CHASSIS_MOTOR_COMMAND_FULL_SCALE          16384.0f  /* 电调协议的电流指令满量程幅值，单位为原始指令值；更换电调时按协议确认。 */
-#define CHASSIS_MOTOR_FEEDBACK_CURRENT_FULL_SCALE 16384.0f  /* 电调电流反馈满量程的原始幅值；与实际安培刻度配套，不随输出限流改变。 */
-#define CHASSIS_MOTOR_CURRENT_LIMIT_A             20.0f     /* 本工程允许的单轮电流幅值上限，单位 A；应为正且不超过协议满量程，须结合硬件能力确认。 */
-/* 限流只改变输出上限，不改变反馈电流的物理刻度。 */
-/* 原始输出限幅，由允许电流除以安培满量程再乘指令满量程派生；通常不直接修改。 */
+#define CHASSIS_MOTOR_KA_NM_PER_A                 0.0156f   /* 转子侧力矩常数，单位 Nm/A，不含减速比*/
+#define CHASSIS_MOTOR_REDUCTION_RATIO             19.0f     /* 电机侧转速与轮侧转速之比*/
+#define CHASSIS_MOTOR_CURRENT_FULL_SCALE_A        20.0f     /* 电调协议满量程对应的电流幅值，单位 A */
+#define CHASSIS_MOTOR_COMMAND_FULL_SCALE          16384.0f  /* 电调协议的电流指令满量程幅值，单位为原始指令值 */
+#define CHASSIS_MOTOR_FEEDBACK_CURRENT_FULL_SCALE 16384.0f  /* 电调电流反馈满量程的原始幅值*/
+#define CHASSIS_MOTOR_CURRENT_LIMIT_A             20.0f     /* 本工程允许的单轮电流幅值上限，单位 A*/
+
+/* 原始输出限幅，由允许电流除以安培满量程再乘指令满量程派生 */
 #define CHASSIS_MOTOR_OUTPUT_LIMIT    (CHASSIS_MOTOR_CURRENT_LIMIT_A / CHASSIS_MOTOR_CURRENT_FULL_SCALE_A * CHASSIS_MOTOR_COMMAND_FULL_SCALE)
-/* 每个反馈原始单位对应的电流，单位 A/原始值；由安培满量程和反馈满量程派生，不独立整定。 */
+/* 每个反馈原始单位对应的电流，单位 A/原始值 */
 #define CHASSIS_MOTOR_CURRENT_PER_RAW (CHASSIS_MOTOR_CURRENT_FULL_SCALE_A / CHASSIS_MOTOR_FEEDBACK_CURRENT_FULL_SCALE)
 
 /* 机械：默认四轮 45° 全向轮，改为 1 选择当前控制器支持的麦轮矩阵。
  * 轮径、半长、半宽均为实际接地点尺寸，单位 m。
- * 全向轮的自转力臂是轮心位置到驱动方向的垂距；只有当前对称 45° 布局才可用下式。 */
+ * 全向轮的自转力臂是轮心位置到驱动方向的垂距；只有当对称 45° 布局才可用下式。 */
 #ifndef USE_MECANUM_CHASSIS
-#define USE_MECANUM_CHASSIS 0  /* 轮型开关：0 使用当前四轮全向矩阵，1 使用麦轮矩阵；须与实际轮型和布局一致。 */
+#define USE_MECANUM_CHASSIS 0  /* 轮型开关：0 使用当前四轮全向矩阵，1 使用麦轮矩阵 */
 #endif
-#define CHASSIS_WHEEL_DIAMETER_M    0.100f                                                          /* 车轮有效滚动直径，单位 m，须大于零；应按实际轮胎和负载测量。 */
-#define CHASSIS_HALF_LENGTH_M       0.200f                                                          /* 前后轮接地点间距的一半，单位 m；影响麦轮轮距和全向轮等效自转力臂。 */
-#define CHASSIS_HALF_WIDTH_M        0.166f                                                          /* 左右轮接地点间距的一半，单位 m；影响麦轮轮距和全向轮等效自转力臂。 */
-#define CHASSIS_WHEEL_TO_CENTRE_M   ((CHASSIS_HALF_LENGTH_M + CHASSIS_HALF_WIDTH_M) * 0.70710678f)  /* 全向矩阵使用的等效自转力臂，单位 m；按半长与半宽之和除以根号二派生，改变布局须复核。 */
-#define CHASSIS_FRONT_BACK_LENGTH_M (2.0f * CHASSIS_HALF_LENGTH_M)                                  /* 麦轮前后轮距，单位 m；由底盘半长乘二派生，通常只修改对应半长。 */
-#define CHASSIS_RIGHT_LEFT_LENGTH_M (2.0f * CHASSIS_HALF_WIDTH_M)                                   /* 麦轮左右轮距，单位 m；由底盘半宽乘二派生，通常只修改对应半宽。 */
+#define CHASSIS_WHEEL_DIAMETER_M    0.100f                                                          /* 车轮有效滚动直径，单位 m*/
+#define CHASSIS_HALF_LENGTH_M       0.200f                                                          /* 前后轮接地点间距的一半，单位 m */
+#define CHASSIS_HALF_WIDTH_M        0.166f                                                          /* 左右轮接地点间距的一半，单位 m */
+#define CHASSIS_WHEEL_TO_CENTRE_M   ((CHASSIS_HALF_LENGTH_M + CHASSIS_HALF_WIDTH_M) * 0.70710678f)  /* 全向矩阵使用的等效自转力臂，单位 m*/
+#define CHASSIS_FRONT_BACK_LENGTH_M (2.0f * CHASSIS_HALF_LENGTH_M)                                  /* 麦轮前后轮距，单位 m*/
+#define CHASSIS_RIGHT_LEFT_LENGTH_M (2.0f * CHASSIS_HALF_WIDTH_M)                                   /* 麦轮左右轮距，单位 m*/
 
-/* 调度：实际 tick 频率由 osKernelGetTickFreq() 传入，周期按 tick 向上取整。
- * PID 采样时间和时间差换算使用同一实际周期/频率。 */
-#define CHASSIS_CONTROL_PERIOD_MS      2U     /* 底盘控制任务请求周期，单位 ms，须大于零；实际按时钟计数向上取整，轮速与跟随环共用该周期。 */
-#define CHASSIS_POWER_PERIOD_MS        1U     /* 功率任务请求周期，单位 ms，须大于零；实际按时钟计数向上取整，能量环使用对应采样时间。 */
-#define CHASSIS_POWER_STARTUP_DELAY_MS 1000U  /* 功率任务开始周期计算前的等待时间，单位 ms；等待结束后重置能量积分时间基准。 */
-/* 以下属性仅由任务创建处解释，优先级名称使用 CMSIS-OS2 定义。 */
-#define CHASSIS_TASK_STACK_SIZE_BYTES       2048U                  /* 底盘任务栈大小，单位字节；须按最坏调用路径和上板栈余量核对。 */
-#define CHASSIS_TASK_PRIORITY               osPriorityAboveNormal  /* 底盘任务的 CMSIS-OS2 优先级；当前高于普通任务，调整时须检查其他任务的调度延迟。 */
-#define CHASSIS_POWER_TASK_STACK_SIZE_BYTES 2048U                  /* 功率任务栈大小，单位字节；须按最坏调用路径和上板栈余量核对。 */
-#define CHASSIS_POWER_TASK_PRIORITY         osPriorityNormal       /* 功率任务的 CMSIS-OS2 优先级；当前为普通优先级，须保证实际周期满足能量环要求。 */
-
-/* 运动约束：x 向右、y 向前，单位 m/s；w 逆时针为正，单位 rad/s。
- * 需按电机允许转速检查平移与旋转叠加后的单轮转速，不能只看单轴上限。 */
+/* 运动约束：x 向右、y 向前，单位 m/s；w 逆时针为正，单位 rad/s。*/
 #define CHASSIS_MAX_SPEED_X_MPS     2.2f   /* 向右为正的机体横向目标速度幅值上限，单位 m/s；须核对与纵移、自转叠加后的各轮转速。 */
 #define CHASSIS_MAX_SPEED_Y_MPS     2.2f   /* 向前为正的机体纵向目标速度幅值上限，单位 m/s；须核对与横移、自转叠加后的各轮转速。 */
-#define CHASSIS_MAX_SPIN_RAD_S      8.0f   /* 机体目标自转角速度幅值上限，单位 rad/s；逆时针为正，须结合轮速与稳定性确认。 */
-#define CHASSIS_MAX_ACC_MPS2        20.0f  /* 横向和纵向目标速度各自的变化率限幅，单位 m/s²；需按负载、附着和驱动能力整定。 */
+#define CHASSIS_MAX_SPIN_RAD_S      8.0f   /* 机体目标自转角速度幅值上限，单位 rad/s；逆时针为正，须结合轮速与稳定性 */
+#define CHASSIS_MAX_ACC_MPS2        20.0f  /* 横向和纵向目标速度各自的变化率限幅，单位 m/s²；需按负载、附着和驱动能力整定 */
 #define CHASSIS_MAX_SPIN_ACC_RAD_S2 60.0f  /* 目标自转角速度变化率限幅，单位 rad/s²；需按整车稳定性和驱动能力整定。 */
 
 /* 任务输入：DBUS 通道由任务换算；中心值使用 remote.h 的 RC_STICK_OFFSET。
@@ -102,7 +87,7 @@
 #ifndef USE_SUPER_CAPACITOR
 #define USE_SUPER_CAPACITOR 1  /* 超级电容反馈支持开关：0 不使用，1 使用；启用后仍须具备真实在线、能量和功率数据。 */
 #endif
-#define CHASSIS_POWER_DIVISION    2U  /* 功率降级参考所用兵种编号：0 步兵、1 英雄、2 哨兵；应与实际机器人一致。 */
+#define CHASSIS_POWER_DIVISION    2U  /* 功率降级参考所用兵种编号：0 步兵、1 英雄、2 哨兵*/
 #define CHASSIS_POWER_LIMIT_MODE  1U  /* 初始用户功率上限选择：0 取当时裁判上限，1 取当时额外释放允许上限；仍受现有最小限值约束。 */
 #define CHASSIS_POWER_RLS_ENABLED 1U  /* 递推辨识的初始开关：0 禁用、1 启用；故障粘滞关闭后不会仅因链路恢复自动重启。 */
 

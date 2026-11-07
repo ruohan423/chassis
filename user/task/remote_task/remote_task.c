@@ -1,3 +1,9 @@
+/* CubeMX 创建说明：保留或由用户创建遥控器常驻线程及二值信号量。
+ * 线程名称 remote_task，入口 Remote_Task，优先级 osPriorityLow，栈 512 字节。
+ * 若界面以 32 位字填写栈大小，填 128。
+ * 二值信号量名称 RemoteSem，最大值 1、初值 0，句柄为 RemoteSemHandle。
+ * USART3 RX DMA 使用 Circular，USART/DMA 中断优先级为 5；收到有效输入前保持安全默认。
+ */
 #include "remote_task.h"
 #include "cmsis_os2.h"
 

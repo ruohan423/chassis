@@ -42,7 +42,6 @@ static void chassis_on_can_frame(CAN_HandleTypeDef *handle, const user_can_frame
 static RefereePowerHeatMessageData power_message;
 static RefereeRobotStatusMessageData robot_message;
 static CapacitorStatus capacitor_status;
-static judge_snapshot_t judge_snapshot;
 static bool referee_connected;
 
 static uint8_t referee_is_connected(void);
@@ -109,15 +108,14 @@ static void chassis_on_can_frame(CAN_HandleTypeDef *handle, const user_can_frame
 #if USE_POWER_CONTROLLER
 void chassis_port_update_feedback(uint32_t now_tick)
 {
-    judge_read_snapshot(&judge_snapshot);
-    const bool robot_online = judge_data_is_fresh(&judge_snapshot, JUDGE_DATA_ROBOT_STATUS, now_tick);
-    const bool heat_online = judge_data_is_fresh(&judge_snapshot, JUDGE_DATA_POWER_HEAT, now_tick);
+    const bool robot_online = judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick);
+    const bool heat_online = judge_data_is_fresh(&judge_data, JUDGE_DATA_POWER_HEAT, now_tick);
     const super_capacitor_data_t *capacitor = super_capacitor_get_data();
 
-    robot_message.chassis_power_limit = robot_online ? judge_snapshot.robot_status.chassis_power_limit : 0U;
-    robot_message.robot_level = robot_online ? judge_snapshot.robot_status.robot_level : 0U;
+    robot_message.chassis_power_limit = robot_online ? judge_data.robot_status.chassis_power_limit : 0U;
+    robot_message.robot_level = robot_online ? judge_data.robot_status.robot_level : 0U;
     referee_connected = robot_online && heat_online;
-    power_message.bufferEnergy = heat_online ? judge_snapshot.power_heat.buffer_energy : 0U;
+    power_message.bufferEnergy = heat_online ? judge_data.power_heat.buffer_energy : 0U;
     /* 2027 协议的 0x0202 无底盘实测功率，不能把保留字段或占位零值当成测量。 */
     power_message.chassisPower = 0.0f;
     power_message.chassisPowerValid = 0U;

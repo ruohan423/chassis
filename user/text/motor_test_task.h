@@ -36,7 +36,6 @@ typedef struct
 
 extern volatile test_config_t motor_config;
 
-bool MotorTest_TaskStart(void);
 void MotorTest_Task(void *argument);
 HAL_StatusTypeDef MotorTest_Work(void);
 HAL_StatusTypeDef MotorTest_Stop(void);

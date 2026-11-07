@@ -1,3 +1,7 @@
+/* CubeMX 创建说明：保留或由用户创建看门狗常驻线程。
+ * 名称 watchdog_task，入口 Watchdog_Task，优先级 osPriorityLow，栈 512 字节。
+ * 若界面以 32 位字填写栈大小，填 128；不需要额外信号量，内核时钟为 1000 Hz。
+ */
 #include "watch_task.h"
 
 #include "board_led.h"

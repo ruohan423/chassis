@@ -6,7 +6,7 @@
 
 ```text
 user/control/chassis/
-    chassis_config.h                 统一配置，沿用现有参数和单位
+    chassis_config.h                 硬件与算法配置，任务调度参数归各任务文件
     chassis.h / chassis.c            给 task 提供接口、构造控制器、生成行为目标
     chassis_port.h / chassis_port.c  给两个 controller 提供反馈数据与电机输出适配
     chassis_controller/
@@ -36,7 +36,6 @@ user/control/chassis/
 | 电流刻度与限幅 | `MOTOR_CURRENT_FULL_SCALE_A`、`MOTOR_COMMAND_FULL_SCALE`、`MOTOR_FEEDBACK_CURRENT_FULL_SCALE`、`MOTOR_CURRENT_LIMIT_A` | 电调协议刻度和允许的连续/峰值电流，单位 A 或原始指令单位 |
 | 通信保护 | `MOTOR_FEEDBACK_TIMEOUT_MS`、`CAN_RETRY_MS` | 实际反馈频率、任务调度延迟、允许断连时间 |
 | 轮型与几何 | `USE_MECANUM_CHASSIS`、`WHEEL_DIAMETER_M`、`HALF_LENGTH_M`、`HALF_WIDTH_M`、`WHEEL_TO_CENTRE_M` | 实测有效轮径和轮接地点位置；全向轮须满足当前 45° 对称布局 |
-| 调度 | `CONTROL_PERIOD_MS`、`POWER_PERIOD_MS`、`POWER_STARTUP_DELAY_MS`、任务栈和优先级 | 实测调度、最坏执行时间、栈余量；tick 频率由 CMSIS-OS2 自动传入 |
 | 运动上限 | `MAX_SPEED_X/Y_MPS`、`MAX_SPIN_RAD_S`、`MAX_ACC_MPS2`、`MAX_SPIN_ACC_RAD_S2` | 电机允许转速、负载、轮胎附着和传动强度，含平动与旋转同时输入的情况 |
 | 输入标定 | `STICK_X/Y_DIRECTION`、`STICK_DIVISOR` | 摇杆实际通道、方向、中位和有效量程；中位沿用 `remote.h` 的 `RC_STICK_OFFSET` |
 | 轮速 PID | `SPEED_KP/KI/KD`、`SPEED_INTEGRAL_LIMIT` | 输入轮侧 rad/s、输出电流原始指令；积分限幅作用于误差积分，单位 rad |
@@ -66,15 +65,20 @@ RLS 保留原来的粘滞关闭行为：无可信反馈等情况关闭后，不�
 
 ## 任务接入与保护
 
-`Core/Src/freertos.c` 的用户保留区在创建底盘和功率任务前调用：
+线程和公共信号量由用户在 CubeMX 中创建并重新生成。`Core/Src/freertos.c` 不手写对象属性、句柄、创建调用或业务初始化，已有生成区保持由 CubeMX 维护。具体属性同时写在各任务源文件开头。
 
-```c
-chassis_power_init(osKernelGetTickCount(), osKernelGetTickFreq());
-```
+| 文件 | 创建名称 / 入口 | 优先级 | 栈大小 |
+| --- | --- | --- | --- |
+| `user/task/chassis_task/chassis_task.c` | `chassis_task` / `Chassis_Task` | `osPriorityAboveNormal` | 2048 字节 |
+| `user/task/power_task/power_task.c` | `power_task` / `Power_Task` | `osPriorityNormal` | 2048 字节 |
 
-底盘任务初始化调用 `chassis_init(now_tick, tick_frequency_hz)`，每周期输入换算后调用 `chassis_update()`。CAN 启动或发送失败返回 false，任务按统一重试周期重新初始化；启动前、停止、未实现模式、跟随角度无效以及无反馈轮始终为零输出。
+若 CubeMX 以 32 位字填写栈大小，两项均填 512。入口绑定当前文件的实现，避免生成重复的强定义。未创建任务不会自动启动；启用功率控制时，底盘会等待功率任务首轮计算完成，再允许非零控制输出。
 
-功率任务保留启动延时，再调用 `chassis_power_start(now_tick)` 重置积分起点，随后周期调用 `chassis_power_update(now_tick)`。实际周期按 RTOS tick 向上取整，PID 采样时间与该周期一致，控制器不再另存一份固定 tick 频率宏。
+底盘周期和重试间隔保留在 `chassis_task.c`，功率周期和启动等待保留在 `power_task.c`。`chassis_config.h` 不再放任务创建属性、周期或启动重试参数。任务将实际时钟频率及取整后的周期计数传入控制器，PID 采样时间与调度周期同源。
+
+`Chassis_Task` 调用 `chassis_init(now_tick, tick_frequency_hz, period_ticks)` 完成装配，每周期换算输入后调用 `chassis_update()`；CAN 启动或发送失败由任务等待后重试。
+
+`Power_Task` 入口调用 `chassis_power_init(now_tick, tick_frequency_hz, period_ticks)`，完成启动等待后重置积分起点，再周期调用 `chassis_power_update()`。不依赖线程创建顺序，也不在 `freertos.c` 初始化功率模块。
 
 重构同时修正了几处影响验证的边界：
 
@@ -86,7 +90,7 @@ chassis_power_init(osKernelGetTickCount(), osKernelGetTickFreq());
 
 `measuredDisplacement` 仍是搬运控制器中机体速度分量的积分，不能当作世界坐标位置。需要世界坐标里程计时还须接入姿态/定位融合，配置几何参数不能替代该实现。
 
-本次不改 CubeMX 配置和生成区。上一轮裁判接收所需的 USART6_RX Circular DMA 配置仍需按 `module/judge/JUDGE_USAGE.md` 完成。
+本次仅移除 `freertos.c` 用户区手写装配，不改生成区与 `.ioc`。裁判任务和信号量按 `user/task/judge_task/judge_task.c` 注释由用户创建；其余串口配置见 `user/module/judge/JUDGE_USAGE.md`。
 
 ## 验证与整定顺序
 

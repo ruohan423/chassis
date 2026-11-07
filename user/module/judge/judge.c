@@ -11,7 +11,7 @@ _Static_assert(sizeof(game_status_t) == 11U, "game_status_t size");
 _Static_assert(sizeof(game_result_t) == 1U, "game_result_t size");
 _Static_assert(sizeof(game_robot_hp_t) == 24U, "game_robot_hp_t size");
 _Static_assert(sizeof(event_data_t) == 8U, "event_data_t size");
-_Static_assert(sizeof(judge_warning_t) == 3U, "judge_warning_t size");
+_Static_assert(sizeof(referee_warning_t) == 3U, "judge_warning_t size");
 _Static_assert(sizeof(judge_dart_info_t) == 3U, "judge_dart_info_t size");
 _Static_assert(sizeof(robot_status_t) == 17U, "robot_status_t size");
 _Static_assert(sizeof(power_heat_data_t) == 14U, "power_heat_data_t size");
@@ -37,7 +37,7 @@ typedef struct
 } judge_field_t;
 
 /* 表中只描述协议字段，不进行行为模式映射。 */
-#define JUDGE_FIELD(command, field, id) {command, offsetof(judge_snapshot_t, field), sizeof(((judge_snapshot_t *)0)->field), id}
+#define JUDGE_FIELD(command, field, id) {command, offsetof(judge_data_package_t, field), sizeof(((judge_data_package_t *)0)->field), id}
 static const judge_field_t commands[] = {
     JUDGE_FIELD(0x0001U, game_status, JUDGE_DATA_GAME_STATUS),
     JUDGE_FIELD(0x0002U, game_result, JUDGE_DATA_GAME_RESULT),
@@ -115,8 +115,7 @@ static const uint16_t crc16_table[256] = {
     0x7BC7U, 0x6A4EU, 0x58D5U, 0x495CU, 0x3DE3U, 0x2C6AU, 0x1EF1U, 0x0F78U,
 };
 
-static judge_snapshot_t snapshots[2];
-static uint8_t active_snapshot;
+judge_data_package_t judge_data;
 static uint8_t receive_buffer[JUDGE_FRAME_MAX_SIZE];
 static uint16_t received_length;
 static judge_received_command_t command_queue[JUDGE_COMMAND_QUEUE_DEPTH];
@@ -131,48 +130,123 @@ judge_tx_status_t judge_tx_status = {
     .byte_limit_per_second = JUDGE_TX_DEFAULT_BYTE_LIMIT,
 };
 
-static uint8_t crc8(const uint8_t *data, uint16_t length);
-static uint16_t crc16(const uint8_t *data, uint16_t length);
-static bool dispatch_command(const judge_frame_t *frame, uint32_t now_tick);
+
+
+static uint8_t crc8(const uint8_t *data, uint16_t length)
+{
+    uint8_t crc = 0xFFU;
+    for (uint16_t index = 0U; index < length; index++)
+    {
+        crc = crc8_table[crc ^ data[index]];
+    }
+    return crc;
+}
+
+static uint16_t crc16(const uint8_t *data, uint16_t length)
+{
+    uint16_t crc = 0xFFFFU;
+    for (uint16_t index = 0U; index < length; index++)
+    {
+        crc = (uint16_t)((crc >> 8) ^ crc16_table[(crc ^ data[index]) & 0xFFU]);
+    }
+    return crc;
+}
+
+
+static bool dispatch_command(uint16_t cmd_id, const uint8_t *data, uint16_t length, uint8_t sequence, uint32_t now_tick)
+{
+    for (uint16_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); index++)
+    {
+        const judge_field_t *field = &commands[index];
+        if (cmd_id != field->command)
+        {
+            continue;
+        }
+        if (field->id == JUDGE_DATA_INTERACTION)
+        {
+            if (length < 6U || length > field->size)
+            {
+                return false;
+            }
+        }
+        else if (length != field->size)
+        {
+            return false;
+        }
+
+        const int32_t previous_lock = osKernelLock();
+        if (field->id == JUDGE_DATA_INTERACTION || field->id == JUDGE_DATA_MAP_COMMAND)
+        {
+            if (command_count == JUDGE_COMMAND_QUEUE_DEPTH)
+            {
+                command_lost = true;
+                if (previous_lock == 0)
+                {
+                    (void)osKernelUnlock();
+                }
+                return true;
+            }
+            judge_received_command_t *command = &command_queue[(command_head + command_count) % JUDGE_COMMAND_QUEUE_DEPTH];
+            command->cmd_id = cmd_id;
+            command->data_length = length;
+            command->sequence = sequence;
+            command->received_tick = now_tick;
+            memcpy(command->data, data, length);
+            command_count++;
+        }
+
+        if (field->id == JUDGE_DATA_INTERACTION)
+        {
+            memset(&judge_data.interaction, 0, sizeof(judge_data.interaction));
+            judge_data.interaction_length = length - 6U;
+        }
+        memcpy((uint8_t *)&judge_data + field->offset, data, length);
+        judge_data.valid_mask |= 1UL << field->id;
+        judge_data.update_tick[field->id] = now_tick;
+        if (previous_lock == 0)
+        {
+            (void)osKernelUnlock();
+        }
+        return true;
+    }
+    return false;
+}
+
+
 
 bool judge_receive(const uint8_t *data, uint16_t length, uint32_t now_tick)
 {
     bool has_valid_frame = false;
-    judge_frame_t frame;
 
     for (uint16_t index = 0U; index < length; index++)
     {
         receive_buffer[received_length++] = data[index];
         while (received_length >= JUDGE_FRAME_HEADER_SIZE)
         {
-            frame.header.sof = receive_buffer[0];
-            frame.header.data_length = (uint16_t)(receive_buffer[1] | ((uint16_t)receive_buffer[2] << 8));
-            frame.header.seq = receive_buffer[3];
-            frame.header.crc8 = receive_buffer[4];
+            const uint16_t data_length = (uint16_t)(receive_buffer[1] | ((uint16_t)receive_buffer[2] << 8));
             uint16_t consumed = 1U;
 
-            if (frame.header.sof == 0xA5U && frame.header.data_length <= JUDGE_FRAME_DATA_SIZE
-                && crc8(receive_buffer, JUDGE_FRAME_HEADER_SIZE - 1U) == frame.header.crc8)
+            if (receive_buffer[0] == 0xA5U && data_length <= JUDGE_FRAME_DATA_SIZE
+                && crc8(receive_buffer, JUDGE_FRAME_HEADER_SIZE - 1U) == receive_buffer[4])
             {
-                const uint16_t frame_length = frame.header.data_length + JUDGE_FRAME_OVERHEAD;
+                const uint16_t frame_length = data_length + JUDGE_FRAME_OVERHEAD;
                 if (received_length < frame_length)
                 {
                     break;
                 }
 
-                frame.tail.crc16 = (uint16_t)(receive_buffer[frame_length - 2U] | ((uint16_t)receive_buffer[frame_length - 1U] << 8));
-                if (crc16(receive_buffer, frame_length - 2U) == frame.tail.crc16)
+                const uint16_t frame_crc16 = (uint16_t)(receive_buffer[frame_length - 2U] | ((uint16_t)receive_buffer[frame_length - 1U] << 8));
+                if (crc16(receive_buffer, frame_length - 2U) == frame_crc16)
                 {
-                    frame.cmd_id = (uint16_t)(receive_buffer[5] | ((uint16_t)receive_buffer[6] << 8));
-                    memcpy(frame.data, &receive_buffer[7], frame.header.data_length);
-                    if (dispatch_command(&frame, now_tick))
+                    /* 分发同步复制载荷，不保留指针；完成后才能移动接收缓冲区。 */
+                    if (dispatch_command((uint16_t)(receive_buffer[5] | ((uint16_t)receive_buffer[6] << 8)),
+                                         &receive_buffer[7], data_length, receive_buffer[3], now_tick))
                     {
                         has_valid_frame = true;
                     }
                     consumed = frame_length;
                 }
             }
-
             /* 坏帧只前移一个字节，保留其中可能包含的下一帧同步字。 */
             received_length -= consumed;
             memmove(receive_buffer, receive_buffer + consumed, received_length);
@@ -190,9 +264,7 @@ void judge_clear(void)
 {
     received_length = 0U;
     const int32_t previous_lock = osKernelLock();
-    const uint8_t next = active_snapshot ^ 1U;
-    memset(&snapshots[next], 0, sizeof(snapshots[next]));
-    active_snapshot = next;
+    memset(&judge_data, 0, sizeof(judge_data));
     if (command_count != 0U)
     {
         command_lost = true;
@@ -207,21 +279,10 @@ void judge_clear(void)
     }
 }
 
-void judge_read_snapshot(judge_snapshot_t *snapshot)
-{
-    /* 单核任务，统一锁定调度保护复制和索引切换；中断不发布快照 */
-    const int32_t previous_lock = osKernelLock();
-    *snapshot = snapshots[active_snapshot];
-    if (previous_lock == 0)
-    {
-        (void)osKernelUnlock();
-    }
-}
-
-bool judge_data_is_fresh(const judge_snapshot_t *snapshot, judge_data_id_t id, uint32_t now_tick)
+bool judge_data_is_fresh(const judge_data_package_t *data, judge_data_id_t id, uint32_t now_tick)
 {
     const uint32_t timeout_ticks = (osKernelGetTickFreq() * JUDGE_LINK_TIMEOUT_MS + 999U) / 1000U;
-    return (snapshot->valid_mask & (1UL << id)) != 0U && now_tick - snapshot->update_tick[id] < timeout_ticks;
+    return (data->valid_mask & (1UL << id)) != 0U && now_tick - data->update_tick[id] < timeout_ticks;
 }
 
 judge_command_result_t judge_read_command(judge_received_command_t *command)
@@ -250,7 +311,7 @@ judge_command_result_t judge_read_command(judge_received_command_t *command)
 judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length)
 {
     const bool sentry_command = data_cmd_id == 0x0120U;
-    if (length > JUDGE_INTERACTION_DATA_SIZE
+    if ((length > 0U && data == NULL) || length > JUDGE_INTERACTION_DATA_SIZE
         || (sentry_command && (receiver_id != 0x8080U || length != sizeof(sentry_cmd_t)))
         || (!sentry_command && (data_cmd_id < 0x0200U || data_cmd_id > 0x02FFU)))
     {
@@ -267,12 +328,11 @@ judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver
         return JUDGE_TX_NOT_READY;
     }
     const uint32_t now_tick = osKernelGetTickCount();
-    const judge_snapshot_t *snapshot = &snapshots[active_snapshot];
-    const uint16_t sender_id = snapshot->robot_status.robot_id;
+    const uint16_t sender_id = judge_data.robot_status.robot_id;
     const uint16_t peer_id = receiver_id >= 100U ? receiver_id - 100U : receiver_id;
     judge_tx_result_t result;
 
-    if (!judge_data_is_fresh(snapshot, JUDGE_DATA_ROBOT_STATUS, now_tick))
+    if (!judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick))
     {
         result = JUDGE_TX_OFFLINE;
     }
@@ -292,12 +352,12 @@ judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver
     else
     {
         judge_tx_request_t *request = &tx_queue[(tx_head + tx_count) % JUDGE_TX_QUEUE_DEPTH];
-        request->interaction.data_cmd_id = data_cmd_id;
-        request->interaction.sender_id = sender_id;
-        request->interaction.receiver_id = receiver_id;
+        request->data_cmd_id = data_cmd_id;
+        request->sender_id = sender_id;
+        request->receiver_id = receiver_id;
         if (length > 0U)
         {
-            memcpy(request->interaction.user_data, data, length);
+            memcpy(request->data, data, length);
         }
         request->data_length = length;
         request->queued_tick = now_tick;
@@ -317,6 +377,10 @@ judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver
 
 judge_tx_result_t judge_send_sentry(const sentry_cmd_t *command)
 {
+    if (command == NULL)
+    {
+        return JUDGE_TX_INVALID;
+    }
     const uint8_t data[4] = {
         (uint8_t)command->sentry_cmd, (uint8_t)(command->sentry_cmd >> 8),
         (uint8_t)(command->sentry_cmd >> 16), (uint8_t)(command->sentry_cmd >> 24),
@@ -374,9 +438,8 @@ judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t se
         return JUDGE_TX_EXPIRED;
     }
     const int32_t previous_lock = osKernelLock();
-    const judge_snapshot_t *snapshot = &snapshots[active_snapshot];
-    const bool current_source = judge_data_is_fresh(snapshot, JUDGE_DATA_ROBOT_STATUS, now_tick)
-        && snapshot->robot_status.robot_id == request->interaction.sender_id;
+    const bool current_source = judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick)
+        && judge_data.robot_status.robot_id == request->sender_id;
     if (previous_lock == 0)
     {
         (void)osKernelUnlock();
@@ -386,113 +449,24 @@ judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t se
         return JUDGE_TX_OFFLINE;
     }
 
-    judge_frame_t frame;
-    frame.header.sof = 0xA5U;
-    frame.header.data_length = request->data_length + 6U;
-    frame.header.seq = sequence;
-    frame.cmd_id = 0x0301U;
-    frame.data[0] = (uint8_t)request->interaction.data_cmd_id;
-    frame.data[1] = (uint8_t)(request->interaction.data_cmd_id >> 8);
-    frame.data[2] = (uint8_t)request->interaction.sender_id;
-    frame.data[3] = (uint8_t)(request->interaction.sender_id >> 8);
-    frame.data[4] = (uint8_t)request->interaction.receiver_id;
-    frame.data[5] = (uint8_t)(request->interaction.receiver_id >> 8);
-    memcpy(frame.data + 6U, request->interaction.user_data, request->data_length);
-
-    buffer[0] = frame.header.sof;
-    buffer[1] = (uint8_t)frame.header.data_length;
-    buffer[2] = (uint8_t)(frame.header.data_length >> 8);
-    buffer[3] = frame.header.seq;
-    frame.header.crc8 = crc8(buffer, JUDGE_FRAME_HEADER_SIZE - 1U);
-    buffer[4] = frame.header.crc8;
-    buffer[5] = (uint8_t)frame.cmd_id;
-    buffer[6] = (uint8_t)(frame.cmd_id >> 8);
-    memcpy(buffer + 7U, frame.data, frame.header.data_length);
-    *length = frame.header.data_length + JUDGE_FRAME_OVERHEAD;
-    frame.tail.crc16 = crc16(buffer, *length - 2U);
-    buffer[*length - 2U] = (uint8_t)frame.tail.crc16;
-    buffer[*length - 1U] = (uint8_t)(frame.tail.crc16 >> 8);
+    const uint16_t data_length = request->data_length + 6U;
+    buffer[0] = 0xA5U;
+    buffer[1] = (uint8_t)data_length;
+    buffer[2] = (uint8_t)(data_length >> 8);
+    buffer[3] = sequence;
+    buffer[4] = crc8(buffer, JUDGE_FRAME_HEADER_SIZE - 1U);
+    buffer[5] = 0x01U;
+    buffer[6] = 0x03U;
+    buffer[7] = (uint8_t)request->data_cmd_id;
+    buffer[8] = (uint8_t)(request->data_cmd_id >> 8);
+    buffer[9] = (uint8_t)request->sender_id;
+    buffer[10] = (uint8_t)(request->sender_id >> 8);
+    buffer[11] = (uint8_t)request->receiver_id;
+    buffer[12] = (uint8_t)(request->receiver_id >> 8);
+    memcpy(buffer + 13U, request->data, request->data_length);
+    *length = data_length + JUDGE_FRAME_OVERHEAD;
+    const uint16_t frame_crc16 = crc16(buffer, *length - sizeof(frame_tail_t));
+    buffer[*length - 2U] = (uint8_t)frame_crc16;
+    buffer[*length - 1U] = (uint8_t)(frame_crc16 >> 8);
     return JUDGE_TX_READY;
-}
-
-static bool dispatch_command(const judge_frame_t *frame, uint32_t now_tick)
-{
-    for (uint16_t index = 0U; index < sizeof(commands) / sizeof(commands[0]); index++)
-    {
-        const judge_field_t *field = &commands[index];
-        if (frame->cmd_id != field->command)
-        {
-            continue;
-        }
-        if (field->id == JUDGE_DATA_INTERACTION)
-        {
-            if (frame->header.data_length < 6U || frame->header.data_length > field->size)
-            {
-                return false;
-            }
-        }
-        else if (frame->header.data_length != field->size)
-        {
-            return false;
-        }
-
-        const int32_t previous_lock = osKernelLock();
-        if (field->id == JUDGE_DATA_INTERACTION || field->id == JUDGE_DATA_MAP_COMMAND)
-        {
-            if (command_count == JUDGE_COMMAND_QUEUE_DEPTH)
-            {
-                command_lost = true;
-                if (previous_lock == 0)
-                {
-                    (void)osKernelUnlock();
-                }
-                return true;
-            }
-            judge_received_command_t *command = &command_queue[(command_head + command_count) % JUDGE_COMMAND_QUEUE_DEPTH];
-            command->cmd_id = frame->cmd_id;
-            command->data_length = frame->header.data_length;
-            command->sequence = frame->header.seq;
-            command->received_tick = now_tick;
-            memcpy(command->data, frame->data, frame->header.data_length);
-            command_count++;
-        }
-
-        const uint8_t next = active_snapshot ^ 1U;
-        snapshots[next] = snapshots[active_snapshot];
-        if (field->id == JUDGE_DATA_INTERACTION)
-        {
-            memset(&snapshots[next].interaction, 0, sizeof(snapshots[next].interaction));
-            snapshots[next].interaction_length = frame->header.data_length - 6U;
-        }
-        memcpy((uint8_t *)&snapshots[next] + field->offset, frame->data, frame->header.data_length);
-        snapshots[next].valid_mask |= 1UL << field->id;
-        snapshots[next].update_tick[field->id] = now_tick;
-        active_snapshot = next;
-        if (previous_lock == 0)
-        {
-            (void)osKernelUnlock();
-        }
-        return true;
-    }
-    return false;
-}
-
-static uint8_t crc8(const uint8_t *data, uint16_t length)
-{
-    uint8_t crc = 0xFFU;
-    for (uint16_t index = 0U; index < length; index++)
-    {
-        crc = crc8_table[crc ^ data[index]];
-    }
-    return crc;
-}
-
-static uint16_t crc16(const uint8_t *data, uint16_t length)
-{
-    uint16_t crc = 0xFFFFU;
-    for (uint16_t index = 0U; index < length; index++)
-    {
-        crc = (uint16_t)((crc >> 8) ^ crc16_table[(crc ^ data[index]) & 0xFFU]);
-    }
-    return crc;
 }

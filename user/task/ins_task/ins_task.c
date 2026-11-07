@@ -1,3 +1,9 @@
+/* CubeMX 创建说明：保留或由用户创建姿态常驻线程。
+ * 名称 ins_task，入口 INS_Task，优先级 osPriorityNormal，栈 2048 字节。
+ * 若界面以 32 位字填写栈大小，填 512；当前采样任务要求内核时钟为 1000 Hz。
+ * CAL_ON_STARTUP 非零时，还需按 calib_task.c 说明创建校准线程。
+ * 本任务通过 Calib_TaskStart 通知已创建线程，不再动态创建校准线程。
+ */
 //
 // 创建日期：2026/10/7。
 //

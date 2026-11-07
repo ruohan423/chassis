@@ -47,33 +47,35 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/algorithm/calibration/bias_config.h
         user/algorithm/pid/pid.c
         user/algorithm/pid/pid.h
-        user/task/calib_task.c
-        user/task/calib_task.h
-        user/task/ins_task.c
+        user/task/ins_task/calib_task.c
+        user/task/ins_task/calib_task.h
+        user/task/ins_task/ins_task.c
         user/module/remote/remote.c
         user/module/remote/remote.h
-        user/peripheral/uart/user_uart.c
-        user/peripheral/uart/user_uart.h
-        user/task/remote_task.c
-        user/task/judge_task.c
-        user/task/judge_task.h
-        user/peripheral/dwt/user_dwt.c
-        user/peripheral/dwt/user_dwt.h
+        user/control/uart/user_uart.c
+        user/control/uart/user_uart.h
+        user/task/remote_task/remote_task.c
+        user/task/judge_task/judge_task.c
+        user/task/judge_task/judge_task.h
+        user/module/dwt/user_dwt.c
+        user/module/dwt/user_dwt.h
         user/module/motor/motor.c
         user/module/motor/motor.h
-        user/peripheral/watchdog/watchdog.c
-        user/peripheral/watchdog/watchdog.h
-        user/task/watch_task.c
-        user/task/watch_task.h
+        user/module/watchdog/watchdog.c
+        user/module/watchdog/watchdog.h
+        user/task/watch_task/watch_task.c
+        user/task/watch_task/watch_task.h
         user/module/buzzer/buzzer.c
         user/module/buzzer/buzzer.h
         user/module/led/board_led.c
         user/module/led/board_led.h
-        user/task/text/motor_test_task.c
-        user/task/text/motor_test_task.h
-        user/peripheral/can/user_can.c
-        user/peripheral/can/user_can.h
-        user/task/chassis_task.c
+        user/text/motor_test_task.c
+        user/text/motor_test_task.h
+        user/text/stack_test.c
+        user/text/stack_test.h
+        user/control/can/user_can.c
+        user/control/can/user_can.h
+        user/task/chassis_task/chassis_task.c
         user/algorithm/ramp/ramp.c
         user/algorithm/ramp/ramp.h
         user/module/judge/judge.c
@@ -93,11 +95,15 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/control/chassis/chassis_config.h
         user/control/chassis/chassis_port/chassis_port.c
         user/control/chassis/chassis_port/chassis_port.h
-        user/task/power_task.c
-        user/task/power_task.h
-        user/task/remote_task.h
-        user/task/ins_task.h
-        user/task/chassis_task.h
+        user/task/power_task/power_task.c
+        user/task/power_task/power_task.h
+        user/task/remote_task/remote_task.h
+        user/task/ins_task/ins_task.h
+        user/task/chassis_task/chassis_task.h
+        user/control/commun/usb_common.c
+        user/control/commun/usb_common.h
+        user/control/commun/can_common.c
+        user/control/commun/can_common.h
 )
 
 # Add STM32CubeMX generated sources
@@ -116,10 +122,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration.c
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration/calibration_session.c
         ${CMAKE_SOURCE_DIR}/user/algorithm/pid/pid.c
-        ${CMAKE_SOURCE_DIR}/user/task/calib_task.c
+        ${CMAKE_SOURCE_DIR}/user/task/ins_task/calib_task.c
         ${CMAKE_SOURCE_DIR}/user/module/remote/remote.c
-        ${CMAKE_SOURCE_DIR}/user/peripheral/uart/user_uart.c
-        ${CMAKE_SOURCE_DIR}/user/peripheral/dwt/user_dwt.c
+        ${CMAKE_SOURCE_DIR}/user/control/uart/user_uart.c
+        ${CMAKE_SOURCE_DIR}/user/module/dwt/user_dwt.c
     # Add user sources here
 )
 
@@ -132,13 +138,20 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/module/bmi088
         ${CMAKE_SOURCE_DIR}/user/module/motor
         ${CMAKE_SOURCE_DIR}/user/module/remote
-        ${CMAKE_SOURCE_DIR}/user/peripheral/uart
-        ${CMAKE_SOURCE_DIR}/user/peripheral/dwt
-        ${CMAKE_SOURCE_DIR}/user/peripheral/watchdog
+        ${CMAKE_SOURCE_DIR}/user/control/uart
+        ${CMAKE_SOURCE_DIR}/user/module/dwt
+        ${CMAKE_SOURCE_DIR}/user/module/watchdog
         ${CMAKE_SOURCE_DIR}/user/module/buzzer
         ${CMAKE_SOURCE_DIR}/user/module/led
-        ${CMAKE_SOURCE_DIR}/user/peripheral/can
+        ${CMAKE_SOURCE_DIR}/user/control/can
         ${CMAKE_SOURCE_DIR}/user/task
+        ${CMAKE_SOURCE_DIR}/user/task/chassis_task
+        ${CMAKE_SOURCE_DIR}/user/task/ins_task
+        ${CMAKE_SOURCE_DIR}/user/task/judge_task
+        ${CMAKE_SOURCE_DIR}/user/task/power_task
+        ${CMAKE_SOURCE_DIR}/user/task/remote_task
+        ${CMAKE_SOURCE_DIR}/user/task/watch_task
+        ${CMAKE_SOURCE_DIR}/user/task/text
         ${CMAKE_SOURCE_DIR}/user/control/chassis
         ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_external
         ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_port

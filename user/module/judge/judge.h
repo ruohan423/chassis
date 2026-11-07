@@ -85,12 +85,12 @@ typedef struct __attribute__((packed))
 } event_data_t;
 
 /* ID: 0x0104   Byte:    3  裁判警告数据 */
-// typedef struct __attribute__((packed))
-// {
-//     uint8_t level;
-//     uint8_t offending_robot_id;
-//     uint8_t count;
-// }referee_warning_t;
+typedef struct __attribute__((packed))
+{
+    uint8_t level;
+    uint8_t offending_robot_id;
+    uint8_t count;
+}referee_warning_t;
 
 /* ID: 0x0105   Byte:   3   飞镖发射相关数据*/
 // typedef struct __attribute__((packed))
@@ -219,12 +219,6 @@ typedef struct __attribute__((packed))
     uint8_t user_data[JUDGE_INTERACTION_DATA_SIZE];       //内容数据段 x 最大为 112
 } robot_interaction_data_t;
 
-typedef struct __attribute__((packed))
-{
-    uint8_t level;
-    uint8_t offending_robot_id;
-    uint8_t count;
-} judge_warning_t;
 
 typedef struct __attribute__((packed))
 {
@@ -270,7 +264,7 @@ typedef struct
     game_result_t game_result;
     game_robot_hp_t robot_hp;
     event_data_t event;
-    judge_warning_t warning;
+    referee_warning_t warning;
     judge_dart_info_t dart_info;
     robot_status_t robot_status;
     power_heat_data_t power_heat;
@@ -287,7 +281,10 @@ typedef struct
     map_command_t map_command;
     uint32_t valid_mask;
     uint32_t update_tick[JUDGE_DATA_COUNT];
-} judge_snapshot_t;
+} judge_data_package_t;
+
+extern judge_data_package_t judge_data;
+
 
 typedef struct
 {
@@ -307,9 +304,12 @@ typedef enum
 
 typedef struct
 {
-    robot_interaction_data_t interaction;
-    uint16_t data_length;          /* user_data 的有效字节数 */
+    uint16_t data_cmd_id;
+    uint16_t sender_id;
+    uint16_t receiver_id;
+    uint16_t data_length;          /* data 的有效字节数 */
     uint32_t queued_tick;
+    uint8_t data[JUDGE_INTERACTION_DATA_SIZE];
 } judge_tx_request_t;
 
 typedef enum
@@ -348,9 +348,7 @@ bool judge_receive(const uint8_t *data, uint16_t length, uint32_t now_tick);
 void judge_clear(void);
 void judge_reset_parser(void);
 
-/* 以下读取接口只用于任务上下文；快照读写统一短暂锁定调度，中断继续运行。 */
-void judge_read_snapshot(judge_snapshot_t *snapshot);
-bool judge_data_is_fresh(const judge_snapshot_t *snapshot, judge_data_id_t id, uint32_t now_tick);
+bool judge_data_is_fresh(const judge_data_package_t *data, judge_data_id_t id, uint32_t now_tick);
 /* 0x0301/0x0303 保序入队，满时丢新；LOST 表示队列溢出或接收流重置（包括初始化）。 */
 judge_command_result_t judge_read_command(judge_received_command_t *command);
 
