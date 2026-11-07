@@ -1,0 +1,21 @@
+
+# CLion
+.idea/
+
+# External projects and dependencies
+exter_add/
+
+# RoboMaster judge protocol documents
+user/module/judge/RoboMaster 2027*.pdf
+
+# Build outputs
+build/
+cmake-build-*/
+
+# Compiled files
+*.o
+*.a
+*.elf
+*.hex
+*.bin
+*.map
