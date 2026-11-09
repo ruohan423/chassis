@@ -111,7 +111,7 @@ HAL_StatusTypeDef MotorTest_Stop(void)
 
 static void receive_motor_feedback(CAN_HandleTypeDef *handle, const user_can_frame_t *frame)
 {
-    if (handle != motor_config.can_handle || frame == NULL || frame->extended
+    if (handle != motor_config.can_handle || frame->extended
         || frame->id != motor_config.feedback_id || frame->length < USER_CAN_DATA_LENGTH){return;}
 
     switch (motor_config.type)

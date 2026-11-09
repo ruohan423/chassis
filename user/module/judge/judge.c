@@ -412,13 +412,19 @@ void judge_read_tx_status(judge_tx_status_t *status)
     }
 }
 
-bool judge_take_tx(judge_tx_request_t *request)
+bool judge_take_tx(judge_tx_frame_t *frame)
 {
     const int32_t previous_lock = osKernelLock();
     const bool available = tx_count > 0U;
     if (available)
     {
-        *request = tx_queue[tx_head];
+        const judge_tx_request_t *request = &tx_queue[tx_head];
+        frame->data_cmd_id = request->data_cmd_id;
+        frame->sender_id = request->sender_id;
+        frame->receiver_id = request->receiver_id;
+        frame->data_length = request->data_length;
+        frame->queued_tick = request->queued_tick;
+        memcpy(frame->buffer + 13U, request->data, request->data_length);
         tx_head = (tx_head + 1U) % JUDGE_TX_QUEUE_DEPTH;
         tx_count--;
     }
@@ -429,17 +435,16 @@ bool judge_take_tx(judge_tx_request_t *request)
     return available;
 }
 
-judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t sequence, uint32_t now_tick,
-                                    uint8_t *buffer, uint16_t *length)
+judge_tx_result_t judge_prepare_tx(judge_tx_frame_t *frame, uint8_t sequence, uint32_t now_tick, uint16_t *length)
 {
     const uint32_t age_ticks = (osKernelGetTickFreq() * JUDGE_TX_MAX_AGE_MS + 999U) / 1000U;
-    if (now_tick - request->queued_tick >= age_ticks)
+    if (now_tick - frame->queued_tick >= age_ticks)
     {
         return JUDGE_TX_EXPIRED;
     }
     const int32_t previous_lock = osKernelLock();
     const bool current_source = judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick)
-        && judge_data.robot_status.robot_id == request->sender_id;
+        && judge_data.robot_status.robot_id == frame->sender_id;
     if (previous_lock == 0)
     {
         (void)osKernelUnlock();
@@ -449,7 +454,14 @@ judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t se
         return JUDGE_TX_OFFLINE;
     }
 
-    const uint16_t data_length = request->data_length + 6U;
+    /* 等待发送期间仍检查时效与发送者，只复用已完成的组帧和 CRC。 */
+    if (*length != 0U)
+    {
+        return JUDGE_TX_READY;
+    }
+
+    uint8_t *buffer = frame->buffer;
+    const uint16_t data_length = frame->data_length + 6U;
     buffer[0] = 0xA5U;
     buffer[1] = (uint8_t)data_length;
     buffer[2] = (uint8_t)(data_length >> 8);
@@ -457,13 +469,12 @@ judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t se
     buffer[4] = crc8(buffer, JUDGE_FRAME_HEADER_SIZE - 1U);
     buffer[5] = 0x01U;
     buffer[6] = 0x03U;
-    buffer[7] = (uint8_t)request->data_cmd_id;
-    buffer[8] = (uint8_t)(request->data_cmd_id >> 8);
-    buffer[9] = (uint8_t)request->sender_id;
-    buffer[10] = (uint8_t)(request->sender_id >> 8);
-    buffer[11] = (uint8_t)request->receiver_id;
-    buffer[12] = (uint8_t)(request->receiver_id >> 8);
-    memcpy(buffer + 13U, request->data, request->data_length);
+    buffer[7] = (uint8_t)frame->data_cmd_id;
+    buffer[8] = (uint8_t)(frame->data_cmd_id >> 8);
+    buffer[9] = (uint8_t)frame->sender_id;
+    buffer[10] = (uint8_t)(frame->sender_id >> 8);
+    buffer[11] = (uint8_t)frame->receiver_id;
+    buffer[12] = (uint8_t)(frame->receiver_id >> 8);
     *length = data_length + JUDGE_FRAME_OVERHEAD;
     const uint16_t frame_crc16 = crc16(buffer, *length - sizeof(frame_tail_t));
     buffer[*length - 2U] = (uint8_t)frame_crc16;

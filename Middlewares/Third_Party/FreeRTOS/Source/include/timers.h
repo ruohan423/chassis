@@ -111,7 +111,7 @@ typedef void (*PendedFunction_t)( void *, uint32_t );
  * xTimerChangePeriodFromISR() API functions can all be used to transition a
  * timer into the active state.
  *
- * @param pcTimerName A text name that is assigned to the timer.  This is done
+ * @param pcTimerName A test name that is assigned to the timer.  This is done
  * purely to assist debugging.  The kernel itself only ever references a timer
  * by its handle, and never by its name.
  *
@@ -188,7 +188,7 @@ typedef void (*PendedFunction_t)( void *, uint32_t );
  *     // the scheduler starts.
  *     for( x = 0; x < NUM_TIMERS; x++ )
  *     {
- *         xTimers[ x ] = xTimerCreate(    "Timer",       // Just a text name, not used by the kernel.
+ *         xTimers[ x ] = xTimerCreate(    "Timer",       // Just a test name, not used by the kernel.
  *                                         ( 100 * x ),   // The timer period in ticks.
  *                                         pdTRUE,        // The timers will auto-reload themselves when they expire.
  *                                         ( void * ) x,  // Assign each timer a unique id equal to its array index.
@@ -257,7 +257,7 @@ typedef void (*PendedFunction_t)( void *, uint32_t );
  * xTimerChangePeriodFromISR() API functions can all be used to transition a
  * timer into the active state.
  *
- * @param pcTimerName A text name that is assigned to the timer.  This is done
+ * @param pcTimerName A test name that is assigned to the timer.  This is done
  * purely to assist debugging.  The kernel itself only ever references a timer
  * by its handle, and never by its name.
  *
@@ -750,7 +750,7 @@ TaskHandle_t xTimerGetTimerDaemonTaskHandle( void ) PRIVILEGED_FUNCTION;
  *
  *     // Create then start the one-shot timer that is responsible for turning
  *     // the back-light off if no keys are pressed within a 5 second period.
- *     xBacklightTimer = xTimerCreate( "BacklightTimer",           // Just a text name, not used by the kernel.
+ *     xBacklightTimer = xTimerCreate( "BacklightTimer",           // Just a test name, not used by the kernel.
  *                                     ( 5000 / portTICK_PERIOD_MS), // The timer period in ticks.
  *                                     pdFALSE,                    // The timer is a one-shot timer.
  *                                     0,                          // The id is not used by the callback so can take any value.

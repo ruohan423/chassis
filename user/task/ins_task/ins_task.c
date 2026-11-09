@@ -8,6 +8,7 @@
 // 创建日期：2026/10/7。
 //
 #include "ins_task.h"
+#include "usb_common.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -21,21 +22,9 @@
 #include "vqf.h"
 
 #define RAD_TO_DEG 57.295779513f
-typedef struct
-{
-    float roll_deg;
-    float pitch_deg;
-    float yaw_deg;
-
-    float accel_earth_x;
-    float accel_earth_y;
-    float accel_earth_z;
-
-} vqf_output_t;
-
 float gyro[3], accel[3];
 float quat6d[4];
-volatile vqf_output_t vqf_output;
+volatile ins_output_t ins_output;
 
 static vqf_real_t gyro_bias[CAL_AXES];
 static vqf_real_t gyro_bias_sigma;
@@ -45,9 +34,6 @@ float temperature_c;
 static void quat_to_euler_deg(const float q[4], float euler[3]);
 static void quat_rotate_vector(const float q[4], const float v[3], float out[3]);
 static bool startup_ready(void);
-#if CAL_ON_STARTUP == 0U
-static void load_bias(void);
-#endif
 
 
 void INS_Task(void *argument)
@@ -96,13 +82,18 @@ void INS_Task(void *argument)
         quat_to_euler_deg(quat6d, euler_deg);
         quat_rotate_vector(quat6d, accel, accel_earth);
 
-        vqf_output.roll_deg = euler_deg[0];
-        vqf_output.pitch_deg = euler_deg[1];
-        vqf_output.yaw_deg = euler_deg[2];
-
-        vqf_output.accel_earth_x = accel_earth[0];
-        vqf_output.accel_earth_y = accel_earth[1];
-        vqf_output.accel_earth_z = accel_earth[2];
+        const int32_t previous_lock = osKernelLock();
+        ins_output.roll_deg = euler_deg[0];
+        ins_output.pitch_deg = euler_deg[1];
+        ins_output.yaw_deg = euler_deg[2];
+        ins_output.accel_earth_x = accel_earth[0];
+        ins_output.accel_earth_y = accel_earth[1];
+        ins_output.accel_earth_z = accel_earth[2];
+        usb_chassis_yaw_deg = euler_deg[2];
+        if (previous_lock == 0)
+        {
+            (void)osKernelRestoreLock(previous_lock);
+        }
 
         next_tick += 1U;
         osDelayUntil(next_tick);
@@ -112,26 +103,29 @@ void INS_Task(void *argument)
 static bool startup_ready(void)
 {
 #if CAL_ON_STARTUP != 0U
-    if (!Calib_TaskStart()) return false;
-    while (!Calib_IsReady() && !Calib_IsFailed()) osDelay(10U);
-    if (!Calib_IsReady()) return false;
-    Calib_GetBias(gyro_bias, &gyro_bias_sigma);
-    return true;
-#else
-    load_bias();
-    return heater_init();
+    if (Calib_TaskStart())
+    {
+        while (!Calib_IsReady() && !Calib_IsFailed()) osDelay(10U);
+        if (Calib_IsReady())
+        {
+            Calib_GetBias(gyro_bias, &gyro_bias_sigma);
+            return true;
+        }
+    }
+    /* 校准未成功时回退固定零偏，继续姿态解算。 */
 #endif
-}
-
-#if CAL_ON_STARTUP == 0U
-static void load_bias(void)
-{
     gyro_bias[0] = GYR_BIAS_X;
     gyro_bias[1] = GYR_BIAS_Y;
     gyro_bias[2] = GYR_BIAS_Z;
     gyro_bias_sigma = fmaxf(GYR_BIAS_SIGMA, GYRO_SIGMA_MIN);
-}
+#if CAL_ON_STARTUP != 0U
+    /* 加热启动失败时保持零输出，不阻止固定零偏下的姿态解算。 */
+    (void)heater_init();
+    return true;
+#else
+    return heater_init();
 #endif
+}
 
 static void quat_to_euler_deg(const float q[4], float euler[3])
 {
@@ -157,22 +151,16 @@ static void quat_to_euler_deg(const float q[4], float euler[3])
 
 static void quat_rotate_vector(const float q[4], const float v[3], float out[3])
 {
-    float q_vec[3] = {q[1], q[2], q[3]};
     float t[3];
-    float cross_qv[3];
     float cross_qt[3];
 
-    cross_qv[0] = q_vec[1] * v[2] - q_vec[2] * v[1];
-    cross_qv[1] = q_vec[2] * v[0] - q_vec[0] * v[2];
-    cross_qv[2] = q_vec[0] * v[1] - q_vec[1] * v[0];
+    t[0] = 2.0f * (q[2] * v[2] - q[3] * v[1]);
+    t[1] = 2.0f * (q[3] * v[0] - q[1] * v[2]);
+    t[2] = 2.0f * (q[1] * v[1] - q[2] * v[0]);
 
-    t[0] = 2.0f * cross_qv[0];
-    t[1] = 2.0f * cross_qv[1];
-    t[2] = 2.0f * cross_qv[2];
-
-    cross_qt[0] = q_vec[1] * t[2] - q_vec[2] * t[1];
-    cross_qt[1] = q_vec[2] * t[0] - q_vec[0] * t[2];
-    cross_qt[2] = q_vec[0] * t[1] - q_vec[1] * t[0];
+    cross_qt[0] = q[2] * t[2] - q[3] * t[1];
+    cross_qt[1] = q[3] * t[0] - q[1] * t[2];
+    cross_qt[2] = q[1] * t[1] - q[2] * t[0];
 
     out[0] = v[0] + q[0] * t[0] + cross_qt[0];
     out[1] = v[1] + q[0] * t[1] + cross_qt[1];

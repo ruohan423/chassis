@@ -1,5 +1,4 @@
-/* 移植自 user/add/ChassisController.c；工程 PID、斜坡与轮侧反馈由下层适配。
- * 轮序固定为右前、左前、左后、右后；接线与安装方向只在 port 层处理。 */
+/* 轮序固定为右前、左前、左后、右后；接线与安装方向只在 port 层处理。 */
 #include "chassis_controller.h"
 
 #include <math.h>

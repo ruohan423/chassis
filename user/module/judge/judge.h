@@ -312,6 +312,17 @@ typedef struct
     uint8_t data[JUDGE_INTERACTION_DATA_SIZE];
 } judge_tx_request_t;
 
+/* 当前发送帧与排队请求分开存储，载荷直接放在整帧中的最终位置。 */
+typedef struct
+{
+    uint16_t data_cmd_id;
+    uint16_t sender_id;
+    uint16_t receiver_id;
+    uint16_t data_length;          /* buffer 中交互载荷的有效字节数 */
+    uint32_t queued_tick;
+    uint8_t buffer[JUDGE_FRAME_MAX_SIZE];
+} judge_tx_frame_t;
+
 typedef enum
 {
     JUDGE_TX_IDLE = 0,
@@ -360,9 +371,10 @@ judge_tx_result_t judge_send_sentry(const sentry_cmd_t *command);
 void judge_set_tx_bandwidth(uint16_t bytes_per_second);
 void judge_read_tx_status(judge_tx_status_t *status);
 
-/* 发送消费者接口仅由 Judge_Task 使用；buffer 至少 JUDGE_FRAME_MAX_SIZE 字节。 */
-bool judge_take_tx(judge_tx_request_t *request);
-judge_tx_result_t judge_prepare_tx(const judge_tx_request_t *request, uint8_t sequence, uint32_t now_tick,
-                                    uint8_t *buffer, uint16_t *length);
+/* 发送消费者接口仅由 Judge_Task 使用。
+ * 新帧先将 length 清零；等待期间保留 frame 和 length，每次仍校验请求时效与发送者。
+ * DMA 完成或成功中止前不得覆盖 frame；接收链路清空只影响队列，不影响当前发送帧。 */
+bool judge_take_tx(judge_tx_frame_t *frame);
+judge_tx_result_t judge_prepare_tx(judge_tx_frame_t *frame, uint8_t sequence, uint32_t now_tick, uint16_t *length);
 
 #endif

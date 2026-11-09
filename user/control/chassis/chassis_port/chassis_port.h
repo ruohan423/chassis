@@ -46,7 +46,7 @@ typedef struct {
     const RefereePowerHeatMessageData   *powerMessage;
     const RefereeRobotStatusMessageData *robotMessage;
     const CapacitorStatus               *capStatus;      /* 未用电容时可为 NULL */
-    uint8_t (*refereeIsConnected)(void);
+    const bool *referee_connected;
 } PowerFeedbackSources;
 
 /* 控制器只读取适配后的稳定对象，协议快照在 port 内部转换。 */

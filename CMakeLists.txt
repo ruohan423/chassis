@@ -69,10 +69,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/buzzer/buzzer.h
         user/module/led/board_led.c
         user/module/led/board_led.h
-        user/text/motor_test_task.c
-        user/text/motor_test_task.h
-        user/text/stack_test.c
-        user/text/stack_test.h
+        user/test/motor_test_task.c
+        user/test/motor_test_task.h
+        user/test/stack_test.c
+        user/test/stack_test.h
         user/control/can/user_can.c
         user/control/can/user_can.h
         user/task/chassis_task/chassis_task.c
@@ -104,6 +104,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/control/commun/usb_common.h
         user/control/commun/can_common.c
         user/control/commun/can_common.h
+        user/task/common_task/usbcom_task.c
+        user/task/common_task/usbcom_task.h
+        user/task/common_task/cancom_task.c
+        user/task/common_task/cancom_task.h
 )
 
 # Add STM32CubeMX generated sources
@@ -132,6 +136,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user
+        ${CMAKE_SOURCE_DIR}/user/control/commun
+        ${CMAKE_SOURCE_DIR}/user/task/common_task
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration
         ${CMAKE_SOURCE_DIR}/user/algorithm/pid
         ${CMAKE_SOURCE_DIR}/user/algorithm/vqf
@@ -151,7 +157,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/task/power_task
         ${CMAKE_SOURCE_DIR}/user/task/remote_task
         ${CMAKE_SOURCE_DIR}/user/task/watch_task
-        ${CMAKE_SOURCE_DIR}/user/task/text
+        ${CMAKE_SOURCE_DIR}/user/task/test
         ${CMAKE_SOURCE_DIR}/user/control/chassis
         ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_external
         ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_port

@@ -8,6 +8,7 @@
 #include "cmsis_os2.h"
 
 #include "chassis.h"
+#include "cancom_task.h"
 #include "remote.h"
 #include "user_uart.h"
 #include "usart.h"
@@ -95,6 +96,7 @@ static void process_received_data(const uint8_t *data, uint16_t data_length, boo
             has_valid_frame = true;
             swdg_feed_remote();
             remote_rx(frame);
+            CanCom_TaskNotifyRemoteFrame();
             frame_length = 0U;
         }
         else

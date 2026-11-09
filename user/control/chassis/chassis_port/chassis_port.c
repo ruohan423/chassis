@@ -44,13 +44,11 @@ static RefereeRobotStatusMessageData robot_message;
 static CapacitorStatus capacitor_status;
 static bool referee_connected;
 
-static uint8_t referee_is_connected(void);
-
 const PowerFeedbackSources chassis_power_sources = {
     .powerMessage = &power_message,
     .robotMessage = &robot_message,
     .capStatus = &capacitor_status,
-    .refereeIsConnected = referee_is_connected,
+    .referee_connected = &referee_connected,
 };
 #endif
 
@@ -125,10 +123,5 @@ void chassis_port_update_feedback(uint32_t now_tick)
     capacitor_status.capacitorRx.errorCode = capacitor->error_code;
     capacitor_status.capacitorRx.capEnergy = capacitor->energy;
     capacitor_status.capacitorRx.chassisPower = capacitor->chassis_power;
-}
-
-static uint8_t referee_is_connected(void)
-{
-    return referee_connected ? 1U : 0U;
 }
 #endif

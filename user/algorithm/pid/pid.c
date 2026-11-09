@@ -1,7 +1,6 @@
 #include "pid.h"
 
 #include <math.h>
-#include <stddef.h>
 #include <stdint.h>
 
 static float constrain_abs(float value, float limit)
@@ -12,7 +11,6 @@ static float constrain_abs(float value, float limit)
 
 void pid_position_init(pid_position_t *pid, float kp, float ki, float kd, float integral_limit,float sample_period_s)
 {
-    if (pid == NULL){return;}
     *pid = (pid_position_t){.kp = kp, .ki = ki, .kd = kd,
                             .integral_limit = fabsf(integral_limit),
                             .sample_period_s = sample_period_s};
@@ -30,7 +28,6 @@ float pid_position_calculate(pid_position_t *pid, float feedback, float referenc
 
 void pid_ffb_init(pid_ffb_t *pid, float kp, float ki, float kd, float kf, float integral_limit,float sample_period_s)
 {
-    if (pid == NULL){return;}
     *pid = (pid_ffb_t){.kp = kp, .ki = ki, .kd = kd, .kf = kf,
                        .integral_limit = fabsf(integral_limit),
                        .sample_period_s = sample_period_s};
@@ -51,7 +48,6 @@ float pid_ffb_calculate(pid_ffb_t *pid, float feedback, float reference)
 void pid_dom_init(pid_dom_t *pid, float kp, float ki, float kd, float integral_limit,
                   float sample_period_s)
 {
-    if (pid == NULL){return;}
     *pid = (pid_dom_t){.kp = kp, .ki = ki, .kd = kd,
                        .integral_limit = fabsf(integral_limit),
                        .sample_period_s = sample_period_s};
@@ -70,7 +66,6 @@ float pid_dom_calculate(pid_dom_t *pid, float feedback, float reference)
 void pid_increment_init(pid_increment_t *pid, float kp, float ki, float kd,
                         float sample_period_s)
 {
-    if (pid == NULL){return;}
     *pid = (pid_increment_t){.kp = kp, .ki = ki, .kd = kd,
                              .sample_period_s = sample_period_s};
 }

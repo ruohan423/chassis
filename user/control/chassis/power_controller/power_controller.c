@@ -26,12 +26,9 @@ static PowerFeedbackSources sources;
 static pid_position_t powerPD_base;  /* ensure the system does not die */
 static pid_position_t powerPD_full;  /* ensure the capacitor's energy keeps under 90% */
 
-/* ---------------- helpers ---------------- */
+/* ---------------- 内部辅助函数 ---------------- */
 static inline uint8_t floatEqual(float a, float b) { return fabsf(a - b) < 1e-5f; }
-static inline void    setErrorFlag(uint8_t *curFlag, enum ErrorFlags setFlag) { *curFlag |= (uint8_t)setFlag; }
-static inline void    clearErrorFlag(uint8_t *curFlag, enum ErrorFlags clearFlag) { *curFlag &= (uint8_t)(~(uint8_t)clearFlag); }
 static inline uint8_t isFlagged(uint8_t curFlag, enum ErrorFlags flag) { return (curFlag & (uint8_t)flag) != 0; }
-static inline uint8_t refereeIsConnected(void) { return sources.refereeIsConnected ? sources.refereeIsConnected() : 0; }
 
 
 static void power_pd_reset(void)
@@ -83,7 +80,6 @@ float *Power_getControlledOutput(PowerObj *objs[4])
     float cmdPower[4];
 
     float sumError = 0.0f;
-    float error[4];
 
     float maxPower = float_constrain(manager.userConfiguredMaxPower, manager.fullMaxPower, manager.baseMaxPower);
 
@@ -98,21 +94,18 @@ float *Power_getControlledOutput(PowerObj *objs[4])
             cmdPower[i] = p->pidOutput * k0 * p->curAv + fabsf(p->curAv) * manager.k1 +
                           p->pidOutput * k0 * p->pidOutput * k0 * manager.k2 + manager.k3 / (float)4;
             sumCmdPower += cmdPower[i];
-            error[i] = fabsf(p->setAv - p->curAv);
             if (floatEqual(cmdPower[i], 0.0f) || cmdPower[i] < 0.0f) {
                 allocatablePower += -cmdPower[i];
             } else {
-                sumError += error[i];
+                sumError += fabsf(p->setAv - p->curAv);
                 sumPowerRequired += cmdPower[i];
             }
         } else if (motorDisconnectCounter[i] < manager.motor_hold_ticks) {
             float tq = motor->torque_nm;
             float av = motor->speed_rad_s;
             cmdPower[i] = tq * av + fabsf(av) * manager.k1 + tq * tq * manager.k2 + manager.k3 / 4.0f;
-            error[i]    = 0.0f;
         } else {
             cmdPower[i] = 0.0f;
-            error[i]    = 0.0f;
         }
     }
 
@@ -169,31 +162,42 @@ float *Power_getControlledOutput(PowerObj *objs[4])
     return newTorqueCurrent;
 }
 
-/* ---------------- setErrorFlag() 无参重载 ---------------- */
+/* ---------------- 更新故障状态 ---------------- */
 static void setErrorFlags(void)
 {
-    /*Judge the error status*/
 #if USE_SUPER_CAPACITOR
     {
         const CapacitorStatus *capStatus = sources.capStatus;
         if (capStatus == NULL || !capStatus->isConnected || !capStatus->capacitorTx.enableDCDC || capStatus->capacitorRx.errorCode != 0)
-            setErrorFlag(&manager.error, CAPDisConnect);
+        {
+            manager.error |= (uint8_t)CAPDisConnect;
+        }
         else
-            clearErrorFlag(&manager.error, CAPDisConnect);
+        {
+            manager.error &= (uint8_t)~(uint8_t)CAPDisConnect;
+        }
     }
 #else
-    setErrorFlag(&manager.error, CAPDisConnect);
+    manager.error |= (uint8_t)CAPDisConnect;
 #endif
 
-    if (!refereeIsConnected())
-        setErrorFlag(&manager.error, RefereeDisConnect);
+    if (!*sources.referee_connected)
+    {
+        manager.error |= (uint8_t)RefereeDisConnect;
+    }
     else
-        clearErrorFlag(&manager.error, RefereeDisConnect);
+    {
+        manager.error &= (uint8_t)~(uint8_t)RefereeDisConnect;
+    }
 
     if (!isAllMotorConnected())
-        setErrorFlag(&manager.error, MotorDisconnect);
+    {
+        manager.error |= (uint8_t)MotorDisconnect;
+    }
     else
-        clearErrorFlag(&manager.error, MotorDisconnect);
+    {
+        manager.error &= (uint8_t)~(uint8_t)MotorDisconnect;
+    }
 }
 
 /* ---------------- powerDaemon: 任务启动段 ---------------- */
