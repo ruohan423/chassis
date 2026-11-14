@@ -33,7 +33,6 @@ float temperature_c;
 
 
 static void quat_to_euler_deg(const float q[4], float euler[3]);
-static void quat_rotate_vector(const float q[4], const float v[3], float out[3]);
 static bool startup_ready(void);
 
 
@@ -78,25 +77,30 @@ void INS_Task(void *argument)
         getQuat6D(quat6d);
 
         float euler_deg[3];
-        float accel_earth[3];
+        float gyro_bias_now[CAL_AXES];
 
+        /* IMU 坐标系即机体坐标系：角速度扣除 VQF 当前零偏估计，加速度为机体系比力（含重力）。 */
         quat_to_euler_deg(quat6d, euler_deg);
-        quat_rotate_vector(quat6d, accel, accel_earth);
+        (void)getBiasEstimate(gyro_bias_now);
+        const float gyro_z = gyro[2] - gyro_bias_now[2];
         const float yaw_rad = euler_deg[2] * 0.01745329252f;
 
         const int32_t previous_lock = osKernelLock();
         ins_output.roll_deg = euler_deg[0];
         ins_output.pitch_deg = euler_deg[1];
         ins_output.yaw_deg = euler_deg[2];
-        ins_output.accel_earth_x = accel_earth[0];
-        ins_output.accel_earth_y = accel_earth[1];
-        ins_output.accel_earth_z = accel_earth[2];
+        ins_output.gyro_x = gyro[0] - gyro_bias_now[0];
+        ins_output.gyro_y = gyro[1] - gyro_bias_now[1];
+        ins_output.gyro_z = gyro_z;
+        ins_output.accel_x = accel[0];
+        ins_output.accel_y = accel[1];
+        ins_output.accel_z = accel[2];
         if (previous_lock == 0)
         {
             (void)osKernelRestoreLock(previous_lock);
         }
-        usb_commun_update_imu(yaw_rad, gyro[2]);
-        can_commun_update_imu(yaw_rad, gyro[2]);
+        usb_commun_update_imu(yaw_rad, gyro_z);
+        can_commun_update_imu(yaw_rad, gyro_z);
 
         next_tick += 1U;
         osDelayUntil(next_tick);
@@ -150,22 +154,4 @@ static void quat_to_euler_deg(const float q[4], float euler[3])
 
     euler[2] = atan2f(2.0f * (q[0] * q[3] + q[1] * q[2]),
                       1.0f - 2.0f * (q[2] * q[2] + q[3] * q[3])) * RAD_TO_DEG;
-}
-
-static void quat_rotate_vector(const float q[4], const float v[3], float out[3])
-{
-    float t[3];
-    float cross_qt[3];
-
-    t[0] = 2.0f * (q[2] * v[2] - q[3] * v[1]);
-    t[1] = 2.0f * (q[3] * v[0] - q[1] * v[2]);
-    t[2] = 2.0f * (q[1] * v[1] - q[2] * v[0]);
-
-    cross_qt[0] = q[2] * t[2] - q[3] * t[1];
-    cross_qt[1] = q[3] * t[0] - q[1] * t[2];
-    cross_qt[2] = q[1] * t[1] - q[2] * t[0];
-
-    out[0] = v[0] + q[0] * t[0] + cross_qt[0];
-    out[1] = v[1] + q[0] * t[1] + cross_qt[1];
-    out[2] = v[2] + q[0] * t[2] + cross_qt[2];
 }
