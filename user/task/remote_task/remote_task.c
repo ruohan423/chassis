@@ -71,7 +71,6 @@ void Remote_Task(void *argument)
 
         if (has_valid_frame && (osKernelGetTickCount() - last_valid_frame_tick >= REMOTE_LINK_TIMEOUT_MS))
         {
-            /* 链路超时：清零输入并切换底盘到安全行为 */
             remote_clear();
             actChassis = CHASSIS_STOP;
             frame_length = 0U;
@@ -116,15 +115,23 @@ static void RemoteCallback(Remote *rc)
         HAL_NVIC_SystemReset();
     }
 
-    if (rc->s1 == 1 && actChassis != CHASSIS_NORMAL) {
-        actChassis = CHASSIS_NORMAL;
-    }  //底盘不跟随云台
-    else if (rc->s1 == 3 && actChassis != CHASSIS_FOLLOW_GIMBAL) {
-        actChassis = CHASSIS_FOLLOW_GIMBAL;
-    }   //底盘跟随云台
-    else if (rc->s1 == 2 && actChassis != CHASSIS_GYROSCOPE) {
-        actChassis = CHASSIS_GYROSCOPE;
-    } //小陀螺模式
+    if (rc->s2 != 1) {return;}
+
+    /* s2=1 为遥控器模式：s1=1 自由模式，s1=2 跟随云台且不限功率，s1=3 快速小陀螺。 */
+    switch (rc->s1)
+    {
+    case 1:
+        actChassis = CHASSIS_FREE;
+        break;
+    case 2:
+        actChassis = CHASSIS_GIMBAL_FOLLOW_POWERED;
+        break;
+    case 3:
+        actChassis = CHASSIS_SPIN_FAST;
+        break;
+    default:
+        break;
+    }
 }
 
 
@@ -133,6 +140,12 @@ static void MouseKeyCallback(Mouse *mouse, Key_t key, Key_t lastkey)
     (void)mouse;
     (void)key;
     (void)lastkey;
+
+    /* 停止态只能由遥控输入模式的复位流程退出。 */
+    if (actChassis == CHASSIS_STOP){return;}
+
+    /* 本回调只在 s2=3 时调用。s1=2 为全自动，只取上位机指令；s1=1、s1=3 功能暂定，先固定为自由模式。 */
+    actChassis = rc_data.rc.s1 == 2 ? CHASSIS_AUTO : CHASSIS_FREE;
 }
 
 

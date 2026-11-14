@@ -1,4 +1,4 @@
-#include "usb_common.h"
+#include "usb_commun.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -13,7 +13,6 @@
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
-
 typedef struct __attribute__((packed))
 {
     uint8_t sof;
@@ -21,26 +20,22 @@ typedef struct __attribute__((packed))
     uint16_t id;
 } usb_frame_header_t;
 
-typedef struct __attribute__((packed))
-{
-    usb_frame_header_t frame_header;
-    uint32_t time_stamp;
-    struct __attribute__((packed))
-    {
-        float gimbal_yaw;
-        float yaw_chassis;
-        float yaw;
-    } data;
-    uint8_t eof;
-} usb_imu_packet_t;
-
 _Static_assert(sizeof(float) == 4U && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "USB 协议要求小端 32 位浮点数");
-_Static_assert(sizeof(usb_frame_header_t) == 4U, "USB 帧头线格式大小不匹配");
-_Static_assert(sizeof(usb_imu_packet_t) == 21U, "USB imu 线格式大小不匹配");
+_Static_assert(sizeof(bool) == 1U, "USB 协议要求 bool 占 1 字节");
+_Static_assert(offsetof(receive_cmd_t, data) == 8U, "USB 控制帧数据偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.chassis_spin) == 20U, "USB 小陀螺字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.gimabal_model) == 21U, "USB 云台模式字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.activate_energy) == 32U, "USB 能量机关字段偏移不匹配");
+_Static_assert(sizeof(receive_cmd_t) == 40U, "USB 控制帧大小不匹配");
+_Static_assert(offsetof(receive_sentry_t, data) == 8U, "USB 哨兵指令帧数据偏移不匹配");
+_Static_assert(offsetof(receive_sentry_t, eof) == 12U, "USB 哨兵指令帧尾偏移不匹配");
+_Static_assert(sizeof(receive_sentry_t) == 16U, "USB 哨兵指令帧大小不匹配");
+_Static_assert(offsetof(send_cmd_t, data) == 8U, "USB 状态帧数据偏移不匹配");
+_Static_assert(sizeof(send_cmd_t) == 20U, "USB 状态帧大小不匹配");
 _Static_assert(sizeof(ground_robot_position_t) == 40U, "USB 地面机器人位置载荷大小不匹配");
 
-static usb_imu_packet_t imu_packet = {
-    .frame_header = {0x5AU, sizeof(imu_packet.data), 0x0010U},
+static send_cmd_t chassis_packet = {
+    .frame_header = 0x1001U,
     .eof = 0xA5U,
 };
 
@@ -58,6 +53,7 @@ static const usb_judge_packet_t judge_packets[] = {
     {0x0003U, JUDGE_DATA_ROBOT_HP, offsetof(judge_data_package_t, robot_hp), sizeof(game_robot_hp_t)},
     {0x0101U, JUDGE_DATA_EVENT, offsetof(judge_data_package_t, event), sizeof(event_data_t)},
     {0x0104U, JUDGE_DATA_WARNING, offsetof(judge_data_package_t, warning), sizeof(referee_warning_t)},
+    {0x0105U, JUDGE_DATA_DART_INFO, offsetof(judge_data_package_t, dart_info), sizeof(dart_info_t)},
     {0x0201U, JUDGE_DATA_ROBOT_STATUS, offsetof(judge_data_package_t, robot_status), sizeof(robot_status_t)},
     {0x0202U, JUDGE_DATA_POWER_HEAT, offsetof(judge_data_package_t, power_heat), sizeof(power_heat_data_t)},
     {0x0203U, JUDGE_DATA_ROBOT_POS, offsetof(judge_data_package_t, robot_pos), sizeof(robot_pos_t)},
@@ -70,7 +66,7 @@ static const usb_judge_packet_t judge_packets[] = {
     {0x020DU, JUDGE_DATA_SENTRY_INFO, offsetof(judge_data_package_t, sentry_info), sizeof(sentry_info_t)},
 };
 
-_Static_assert(sizeof(judge_packets) / sizeof(judge_packets[0]) == 15U, "USB 裁判数据包数量不匹配");
+_Static_assert(sizeof(judge_packets) / sizeof(judge_packets[0]) == 16U, "USB 裁判数据包数量不匹配");
 
 #define USB_JUDGE_PACKET_MAX_DATA_SIZE sizeof(ground_robot_position_t)
 #define USB_JUDGE_PACKET_COUNT (sizeof(judge_packets) / sizeof(judge_packets[0]))
@@ -81,14 +77,11 @@ typedef struct
 {
     uint32_t judge_sent_ticks[USB_JUDGE_PACKET_COUNT];
     uint16_t judge_sent_mask;
-    uint16_t judge_sent_valid_mask;
     uint8_t next_judge_packet;
     uint32_t last_send_tick;
-    uint32_t last_imu_send_tick;
-    uint32_t last_judge_send_tick;
+    uint32_t last_state_send_tick;
     bool has_sent_packet;
-    bool has_sent_imu;
-    bool has_sent_judge_packet;
+    bool has_sent_state;
 } usb_send_state_t;
 
 typedef enum
@@ -100,37 +93,51 @@ typedef enum
 
 static usb_send_state_t send_state;
 
-volatile float usb_chassis_yaw_deg;
+volatile float usb_chassis_yaw_rad;
+volatile float usb_chassis_wz_rad_s;
+volatile bool usb_chassis_imu_valid;
 
-#define USB_POSTURE_QUEUE_DEPTH 4U  /* 完整姿态命令的保序队列深度，满时丢新并报告。 */
-#define USB_POSTURE_FRAME_SIZE (8U + sizeof(usb_posture_data_t))  /* 固定开销加 5 字节载荷，共 13 字节。 */
+void usb_commun_update_imu(float yaw_rad, float yaw_rate_rad_s)
+{
+    const int32_t previous_lock = osKernelLock();
+    if (previous_lock < 0)
+    {
+        return;
+    }
 
-_Static_assert(sizeof(usb_posture_data_t) == 5U, "USB 姿态载荷大小不匹配");
+    usb_chassis_yaw_rad = yaw_rad;
+    usb_chassis_wz_rad_s = yaw_rate_rad_s;
+    usb_chassis_imu_valid = true;
+    if (previous_lock == 0)
+    {
+        (void)osKernelRestoreLock(previous_lock);
+    }
+}
+
+#define USB_CONTROL_FRAME_HEADER 0x1002U
+#define USB_SENTRY_FRAME_HEADER  0x1003U
+#define USB_CONTROL_FRAME_SIZE   sizeof(receive_cmd_t)
+#define USB_SENTRY_FRAME_SIZE    sizeof(receive_sentry_t)
 
 static uint8_t receive_buffer[CDC_DATA_FS_OUT_PACKET_SIZE];
 static uint8_t *volatile receive_endpoint_buffer;
 static volatile uint32_t receive_length;
 static volatile bool receive_reset_pending;
 static volatile bool receive_error_pending;
-static uint8_t receive_frame[USB_POSTURE_FRAME_SIZE];
+static uint8_t receive_frame[USB_CONTROL_FRAME_SIZE];
 static uint8_t receive_frame_length;
 static uint32_t last_receive_tick;
-static usb_posture_command_t posture_queue[USB_POSTURE_QUEUE_DEPTH];
-static uint8_t posture_head;
-static uint8_t posture_count;
-static uint8_t posture_events;
+static receive_cmd_t received_command;
+static bool command_pending;
 
 static bool usb_transmit(uint8_t *buffer, uint16_t length);
-static bool usb_send_imu(uint32_t now_tick);
-static bool usb_send_judge_data(uint32_t now_tick, uint8_t index, bool *pending);
+static bool usb_send_chassis(uint32_t now_tick);
+static usb_send_result_t usb_send_judge_data(uint32_t now_tick, uint8_t index);
 static bool usb_is_ready(void);
-static usb_send_result_t usb_send_imu_if_due(uint32_t now_tick);
-static usb_send_result_t usb_send_judge_if_due(uint32_t now_tick);
+static usb_send_result_t usb_send_state_if_due(uint32_t now_tick);
 
 void usb_send_update(uint32_t now_tick)
 {
-    usb_send_result_t result;
-
     if (send_state.has_sent_packet && now_tick - send_state.last_send_tick < USB_SEND_MIN_INTERVAL_MS)
     {
         return;
@@ -141,13 +148,28 @@ void usb_send_update(uint32_t now_tick)
         return;
     }
 
-    result = usb_send_imu_if_due(now_tick);
-    if (result != USB_SEND_NOT_DUE)
+    if (usb_send_state_if_due(now_tick) != USB_SEND_NOT_DUE)
     {
         return;
     }
 
-    (void)usb_send_judge_if_due(now_tick);
+    /* 裁判包不设独立周期：每次至多提交一包，轮询起点后移，避免高频包饿死低频包。 */
+    for (uint8_t checked = 0U; checked < USB_JUDGE_PACKET_COUNT; checked++)
+    {
+        const uint8_t index = (uint8_t)((send_state.next_judge_packet + checked) % USB_JUDGE_PACKET_COUNT);
+        const usb_send_result_t result = usb_send_judge_data(now_tick, index);
+        if (result == USB_SEND_BLOCKED)
+        {
+            return;
+        }
+        if (result == USB_SEND_SENT)
+        {
+            send_state.has_sent_packet = true;
+            send_state.last_send_tick = now_tick;
+            send_state.next_judge_packet = (uint8_t)((index + 1U) % USB_JUDGE_PACKET_COUNT);
+            return;
+        }
+    }
 }
 
 static bool usb_is_ready(void)
@@ -161,62 +183,28 @@ static bool usb_is_ready(void)
     return ready;
 }
 
-static usb_send_result_t usb_send_imu_if_due(uint32_t now_tick)
+static usb_send_result_t usb_send_state_if_due(uint32_t now_tick)
 {
-    if (send_state.has_sent_imu && now_tick - send_state.last_imu_send_tick < USB_IMU_SEND_INTERVAL_MS)
+    if (send_state.has_sent_state && now_tick - send_state.last_state_send_tick < USB_STATE_SEND_INTERVAL_MS)
     {
         return USB_SEND_NOT_DUE;
     }
 
-    if (!usb_send_imu(now_tick))
+    if (!usb_send_chassis(now_tick))
     {
         return USB_SEND_BLOCKED;
     }
 
-    send_state.has_sent_imu = true;
-    send_state.last_imu_send_tick = now_tick;
+    send_state.has_sent_state = true;
+    send_state.last_state_send_tick = now_tick;
     send_state.has_sent_packet = true;
     send_state.last_send_tick = now_tick;
     return USB_SEND_SENT;
 }
 
-static usb_send_result_t usb_send_judge_if_due(uint32_t now_tick)
-{
-    if (send_state.has_sent_judge_packet
-        && now_tick - send_state.last_judge_send_tick < USB_JUDGE_SEND_INTERVAL_MS)
-    {
-        return USB_SEND_NOT_DUE;
-    }
-
-    for (uint8_t checked = 0U; checked < USB_JUDGE_PACKET_COUNT; checked++)
-    {
-        const uint8_t index = (uint8_t)((send_state.next_judge_packet + checked) % USB_JUDGE_PACKET_COUNT);
-        bool pending;
-        if (!usb_send_judge_data(now_tick, index, &pending))
-        {
-            if (pending)
-            {
-                return USB_SEND_BLOCKED;
-            }
-            continue;
-        }
-
-        send_state.last_judge_send_tick = now_tick;
-        send_state.has_sent_judge_packet = true;
-        send_state.has_sent_packet = true;
-        send_state.last_send_tick = now_tick;
-        send_state.next_judge_packet = (uint8_t)((index + 1U) % USB_JUDGE_PACKET_COUNT);
-        return USB_SEND_SENT;
-    }
-
-    return USB_SEND_NOT_DUE;
-}
-
 static bool usb_transmit(uint8_t *buffer, uint16_t length)
 {
     bool accepted = false;
-
-    /* 填包期间允许 USB 中断，提交前重新确认类对象与端点状态。 */
     taskENTER_CRITICAL();
     const USBD_CDC_HandleTypeDef *cdc = hUsbDeviceFS.pClassData;
     if (hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && cdc != NULL && cdc->TxState == 0U)
@@ -227,46 +215,47 @@ static bool usb_transmit(uint8_t *buffer, uint16_t length)
     return accepted;
 }
 
-static bool usb_send_imu(uint32_t now_tick)
+static bool usb_send_chassis(uint32_t now_tick)
 {
-    imu_packet.time_stamp = now_tick;
+    memset(&chassis_packet, 0, sizeof(chassis_packet));
+    chassis_packet.frame_timestamp = now_tick;
     const int32_t previous_lock = osKernelLock();
     if (previous_lock < 0)
     {
         return false;
     }
-    imu_packet.data.yaw_chassis = usb_chassis_yaw_deg * (3.14159265f / 180.0f);
-    /* 云台相对角与绝对角尚未接入，保持零值；此时间戳不是传感器原始采样时间。 */
+    chassis_packet.data.chassis_yaw = usb_chassis_yaw_rad;
+    chassis_packet.data.chassis_wz = usb_chassis_wz_rad_s;
     if (previous_lock == 0)
     {
         (void)osKernelRestoreLock(previous_lock);
     }
-    return usb_transmit((uint8_t *)&imu_packet, sizeof(imu_packet));
+    chassis_packet.frame_header = 0x1001U;
+    chassis_packet.eof = 0xA5U;
+    return usb_transmit((uint8_t *)&chassis_packet, sizeof(chassis_packet));
 }
 
-static bool usb_send_judge_data(uint32_t now_tick, uint8_t index, bool *pending)
+static usb_send_result_t usb_send_judge_data(uint32_t now_tick, uint8_t index)
 {
     const usb_judge_packet_t *packet = &judge_packets[index];
     const uint16_t sent_bit = (uint16_t)(1U << index);
     const int32_t previous_lock = osKernelLock();
     if (previous_lock < 0)
     {
-        *pending = false;
-        return false;
+        return USB_SEND_NOT_DUE;
     }
 
-    const bool fresh = judge_data_is_fresh(&judge_data, packet->data_id, now_tick);
+    /* 只在 Judge_Task 收到该命令的新帧后转发一次，发送频率跟随裁判系统下发频率；
+     * 没有新帧、链路超时或数据被清空时不发送，也不补发清零包，时效由上位机按收包时间判断。 */
     const uint32_t update_tick = judge_data.update_tick[packet->data_id];
-    *pending = fresh
-        ? ((send_state.judge_sent_mask & sent_bit) == 0U || send_state.judge_sent_ticks[index] != update_tick)
-        : (send_state.judge_sent_valid_mask & sent_bit) != 0U;
-    if (!*pending)
+    if ((judge_data.valid_mask & (1UL << packet->data_id)) == 0U
+        || ((send_state.judge_sent_mask & sent_bit) != 0U && send_state.judge_sent_ticks[index] == update_tick))
     {
         if (previous_lock == 0)
         {
             (void)osKernelRestoreLock(previous_lock);
         }
-        return false;
+        return USB_SEND_NOT_DUE;
     }
 
     judge_packet_buffer[0] = 0x5AU;
@@ -274,14 +263,7 @@ static bool usb_send_judge_data(uint32_t now_tick, uint8_t index, bool *pending)
     judge_packet_buffer[2] = (uint8_t)packet->command_id;
     judge_packet_buffer[3] = (uint8_t)(packet->command_id >> 8U);
     memcpy(&judge_packet_buffer[4], &now_tick, sizeof(now_tick));
-    if (fresh)
-    {
-        memcpy(&judge_packet_buffer[8], (const uint8_t *)&judge_data + packet->offset, packet->length);
-    }
-    else
-    {
-        memset(&judge_packet_buffer[8], 0, packet->length);
-    }
+    memcpy(&judge_packet_buffer[8], (const uint8_t *)&judge_data + packet->offset, packet->length);
     judge_packet_buffer[8U + packet->length] = 0xA5U;
     if (previous_lock == 0)
     {
@@ -289,21 +271,12 @@ static bool usb_send_judge_data(uint32_t now_tick, uint8_t index, bool *pending)
     }
     if (!usb_transmit(judge_packet_buffer, sizeof(usb_frame_header_t) + sizeof(now_tick) + packet->length + 1U))
     {
-        return false;
+        return USB_SEND_BLOCKED;
     }
 
-    if (fresh)
-    {
-        send_state.judge_sent_ticks[index] = update_tick;
-        send_state.judge_sent_mask |= sent_bit;
-        send_state.judge_sent_valid_mask |= sent_bit;
-    }
-    else
-    {
-        send_state.judge_sent_mask &= (uint16_t)~sent_bit;
-        send_state.judge_sent_valid_mask &= (uint16_t)~sent_bit;
-    }
-    return true;
+    send_state.judge_sent_ticks[index] = update_tick;
+    send_state.judge_sent_mask |= sent_bit;
+    return USB_SEND_SENT;
 }
 
 void usb_receive_reset(void)
@@ -330,24 +303,19 @@ void usb_receive_from_isr(uint8_t *buffer, uint32_t length)
     receive_endpoint_buffer = buffer;
 }
 
-void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks, uint32_t command_max_age_ticks)
+void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
 {
     uint8_t data[CDC_DATA_FS_OUT_PACKET_SIZE];
     uint32_t length = 0U;
 
-    /* 只在交接区内取走一包、更新队列状态和重装端点，不在这里拼帧或校验。 */
+    /* 只在交接区内取走一包并重装端点，拼帧和校验在临界区外执行。 */
     taskENTER_CRITICAL();
     const bool connected = hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && hUsbDeviceFS.pClassData != NULL;
     if (receive_reset_pending || !connected)
     {
-        if (receive_reset_pending || posture_count != 0U || receive_frame_length != 0U || receive_endpoint_buffer != NULL)
-        {
-            posture_events |= USB_POSTURE_RESET;
-        }
         receive_reset_pending = false;
         receive_frame_length = 0U;
-        posture_head = 0U;
-        posture_count = 0U;
+        command_pending = false;
         if (!connected)
         {
             receive_endpoint_buffer = NULL;
@@ -357,17 +325,10 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks, uint32
             return;
         }
     }
-    while (posture_count != 0U && now_tick - posture_queue[posture_head].received_tick >= command_max_age_ticks)
-    {
-        posture_head = (posture_head + 1U) % USB_POSTURE_QUEUE_DEPTH;
-        posture_count--;
-        posture_events |= USB_POSTURE_EXPIRED;
-    }
     if (receive_error_pending)
     {
         receive_error_pending = false;
         receive_frame_length = 0U;
-        posture_events |= USB_POSTURE_RX_ERROR;
     }
     if (receive_endpoint_buffer != NULL)
     {
@@ -380,10 +341,6 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks, uint32
         {
             receive_endpoint_buffer = NULL;
         }
-        else
-        {
-            posture_events |= USB_POSTURE_RX_ERROR;
-        }
     }
     taskEXIT_CRITICAL();
 
@@ -394,43 +351,54 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks, uint32
     for (uint32_t index = 0U; index < length; index++)
     {
         receive_frame[receive_frame_length++] = data[index];
-        if (receive_frame_length < USB_POSTURE_FRAME_SIZE)
+        /* 帧头决定帧长；滑动后剩余字节里可能已有完整短帧，需循环处理到数据不足为止。 */
+        while (receive_frame_length >= sizeof(uint32_t))
         {
-            continue;
-        }
-        if (receive_frame[0] == 0x5AU && receive_frame[1] == sizeof(usb_posture_data_t)
-            && receive_frame[2] == 0x12U && receive_frame[USB_POSTURE_FRAME_SIZE - 1U] == 0xA5U
-            && receive_frame[7] >= USB_POSTURE_ATTACK && receive_frame[7] <= USB_POSTURE_MOVE
-            && receive_frame[8] <= 1U && receive_frame[9] <= 1U && receive_frame[10] <= 1U && receive_frame[11] <= 1U)
-        {
-            taskENTER_CRITICAL();
-            /* 解析期间若重新枚举，当前局部数据属于旧连接，不能继续发布。 */
-            if (receive_reset_pending || hUsbDeviceFS.dev_state != USBD_STATE_CONFIGURED || hUsbDeviceFS.pClassData == NULL)
+            uint32_t frame_header;
+            memcpy(&frame_header, receive_frame, sizeof(frame_header));
+            const uint8_t frame_size = frame_header == USB_CONTROL_FRAME_HEADER ? USB_CONTROL_FRAME_SIZE
+                : frame_header == USB_SENTRY_FRAME_HEADER ? USB_SENTRY_FRAME_SIZE : 0U;
+            uint8_t consumed = 1U;
+
+            if (frame_size != 0U)
             {
-                taskEXIT_CRITICAL();
-                receive_frame_length = 0U;
-                break;
+                if (receive_frame_length < frame_size)
+                {
+                    break;
+                }
+                const bool valid = frame_header == USB_CONTROL_FRAME_HEADER
+                    ? (receive_frame[offsetof(receive_cmd_t, eof)] == 0xA5U
+                       && receive_frame[offsetof(receive_cmd_t, data.chassis_spin)] <= 1U
+                       && receive_frame[offsetof(receive_cmd_t, data.gimabal_model)] <= 2U
+                       && receive_frame[offsetof(receive_cmd_t, data.activate_energy)] <= 1U)
+                    : receive_frame[offsetof(receive_sentry_t, eof)] == 0xA5U;
+                if (valid)
+                {
+                    taskENTER_CRITICAL();
+                    const bool still_connected = !receive_reset_pending && hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED
+                        && hUsbDeviceFS.pClassData != NULL;
+                    if (still_connected && frame_header == USB_CONTROL_FRAME_HEADER)
+                    {
+                        memcpy(&received_command, receive_frame, sizeof(received_command));
+                        command_pending = true;
+                    }
+                    taskEXIT_CRITICAL();
+                    if (!still_connected)
+                    {
+                        receive_frame_length = 0U;
+                        return;
+                    }
+                    if (frame_header == USB_SENTRY_FRAME_HEADER)
+                    {
+                        /* 登记为 0x0301/0x0120 请求，由 Judge_Task 按裁判串口限频发出；只保留最新一条。 */
+                        judge_send_sentry((const sentry_cmd_t *)&receive_frame[offsetof(receive_sentry_t, data)]);
+                    }
+                    consumed = frame_size;
+                }
             }
-            if (posture_count == USB_POSTURE_QUEUE_DEPTH)
-            {
-                posture_events |= USB_POSTURE_OVERFLOW;
-            }
-            else
-            {
-                usb_posture_command_t *command = &posture_queue[(posture_head + posture_count) % USB_POSTURE_QUEUE_DEPTH];
-                memcpy(&command->data, &receive_frame[7], sizeof(command->data));
-                memcpy(&command->time_stamp, &receive_frame[3], sizeof(command->time_stamp));
-                command->received_tick = now_tick;
-                posture_count++;
-            }
-            taskEXIT_CRITICAL();
-            receive_frame_length = 0U;
-        }
-        else
-        {
-            /* 坏帧前移一个字节，保留其中可能存在的下一帧帧头。 */
-            memmove(receive_frame, &receive_frame[1], USB_POSTURE_FRAME_SIZE - 1U);
-            receive_frame_length = USB_POSTURE_FRAME_SIZE - 1U;
+            /* 未知帧头或校验失败只前移一个字节，保留其中可能包含的下一帧。 */
+            receive_frame_length -= consumed;
+            memmove(receive_frame, &receive_frame[consumed], receive_frame_length);
         }
     }
     if (length != 0U)
@@ -439,26 +407,18 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks, uint32
     }
 }
 
-usb_posture_result_t usb_read_posture(usb_posture_command_t *command)
+bool usb_read_command(receive_cmd_t *command)
 {
-    usb_posture_result_t result = USB_POSTURE_EMPTY;
+    bool available = false;
 
     taskENTER_CRITICAL();
-    if (!receive_reset_pending && hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED && hUsbDeviceFS.pClassData != NULL)
+    if (command_pending && !receive_reset_pending && hUsbDeviceFS.dev_state == USBD_STATE_CONFIGURED
+        && hUsbDeviceFS.pClassData != NULL)
     {
-        if (posture_events != 0U)
-        {
-            result = (usb_posture_result_t)posture_events;
-            posture_events = 0U;
-        }
-        else if (posture_count != 0U)
-        {
-            *command = posture_queue[posture_head];
-            posture_head = (posture_head + 1U) % USB_POSTURE_QUEUE_DEPTH;
-            posture_count--;
-            result = USB_POSTURE_READY;
-        }
+        *command = received_command;
+        command_pending = false;
+        available = true;
     }
     taskEXIT_CRITICAL();
-    return result;
+    return available;
 }

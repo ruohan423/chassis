@@ -14,11 +14,8 @@
 #define JUDGE_FRAME_MAX_SIZE 127U
 #define JUDGE_FRAME_DATA_SIZE (JUDGE_FRAME_MAX_SIZE - JUDGE_FRAME_OVERHEAD)
 #define JUDGE_LINK_TIMEOUT_MS 200U
-#define JUDGE_TX_QUEUE_DEPTH 4U
 #define JUDGE_COMMAND_QUEUE_DEPTH 4U
 #define JUDGE_TX_MAX_HZ 30U
-#define JUDGE_TX_DEFAULT_BYTE_LIMIT 3000U
-#define JUDGE_TX_MAX_AGE_MS 500U
 #define JUDGE_TX_TIMEOUT_MS 50U
 
 
@@ -93,11 +90,11 @@ typedef struct __attribute__((packed))
 }referee_warning_t;
 
 /* ID: 0x0105   Byte:   3   飞镖发射相关数据*/
-// typedef struct __attribute__((packed))
-// {
-//     uint8_t dart_remaining_time;
-//     uint16_t dart_info;
-// }dart_info_t;
+typedef struct __attribute__((packed))
+{
+    uint8_t dart_remaining_time;
+    uint16_t dart_info;
+}dart_info_t;
 
 /* ID: 0x0201   Byte:   17 	机器人性能体系数据 */
 typedef struct __attribute__((packed))
@@ -220,11 +217,6 @@ typedef struct __attribute__((packed))
 } robot_interaction_data_t;
 
 
-typedef struct __attribute__((packed))
-{
-    uint8_t dart_remaining_time;
-    uint16_t dart_info;
-} judge_dart_info_t;
 
 typedef struct __attribute__((packed))
 {
@@ -265,7 +257,7 @@ typedef struct
     game_robot_hp_t robot_hp;
     event_data_t event;
     referee_warning_t warning;
-    judge_dart_info_t dart_info;
+    dart_info_t dart_info;
     robot_status_t robot_status;
     power_heat_data_t power_heat;
     robot_pos_t robot_pos;
@@ -305,53 +297,10 @@ typedef enum
 typedef struct
 {
     uint16_t data_cmd_id;
-    uint16_t sender_id;
     uint16_t receiver_id;
     uint16_t data_length;          /* data 的有效字节数 */
-    uint32_t queued_tick;
     uint8_t data[JUDGE_INTERACTION_DATA_SIZE];
 } judge_tx_request_t;
-
-/* 当前发送帧与排队请求分开存储，载荷直接放在整帧中的最终位置。 */
-typedef struct
-{
-    uint16_t data_cmd_id;
-    uint16_t sender_id;
-    uint16_t receiver_id;
-    uint16_t data_length;          /* buffer 中交互载荷的有效字节数 */
-    uint32_t queued_tick;
-    uint8_t buffer[JUDGE_FRAME_MAX_SIZE];
-} judge_tx_frame_t;
-
-typedef enum
-{
-    JUDGE_TX_IDLE = 0,
-    JUDGE_TX_QUEUED,
-    JUDGE_TX_READY,
-    JUDGE_TX_ACTIVE,
-    JUDGE_TX_DONE,
-    JUDGE_TX_INVALID,
-    JUDGE_TX_QUEUE_FULL,
-    JUDGE_TX_OFFLINE,
-    JUDGE_TX_CONFIG_ERROR,
-    JUDGE_TX_EXPIRED,
-    JUDGE_TX_DMA_ERROR,
-    JUDGE_TX_TIMEOUT,
-    JUDGE_TX_UART_BUSY,
-    JUDGE_TX_NOT_READY,
-} judge_tx_result_t;
-
-typedef struct
-{
-    judge_tx_result_t result;
-    uint16_t data_cmd_id;
-    uint16_t receiver_id;
-    uint8_t sequence;
-    uint16_t byte_limit_per_second;
-} judge_tx_status_t;
-
-/* 结果字段仅 Judge_Task 写；字节预算仅由 judge_set_tx_bandwidth() 修改。 */
-extern judge_tx_status_t judge_tx_status;
 
 /* 接收、清空、拼帧复位仅由 Judge_Task 调用；时间单位为 CMSIS-OS2 tick。
  * 接收返回是否识别到支持的有效命令，队列满时仍维持接收链路时效。 */
@@ -363,18 +312,12 @@ bool judge_data_is_fresh(const judge_data_package_t *data, judge_data_id_t id, u
 /* 0x0301/0x0303 保序入队，满时丢新；LOST 表示队列溢出或接收流重置（包括初始化）。 */
 judge_command_result_t judge_read_command(judge_received_command_t *command);
 
-/* 仅入队，不代表已发送或服务器已执行；发送者 ID 从新鲜的哨兵状态中取得。
- * 支持 0x0120（4 字节，服务器 0x8080）和 0x0200～0x02FF（己方机器人）。 */
-judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length);
-judge_tx_result_t judge_send_sentry(const sentry_cmd_t *command);
-/* 本机整帧字节/秒预算，0 暂停新帧；不能替代队伍对接收方共享额度的分配。 */
-void judge_set_tx_bandwidth(uint16_t bytes_per_second);
-void judge_read_tx_status(judge_tx_status_t *status);
-
-/* 发送消费者接口仅由 Judge_Task 使用。
- * 新帧先将 length 清零；等待期间保留 frame 和 length，每次仍校验请求时效与发送者。
- * DMA 完成或成功中止前不得覆盖 frame；接收链路清空只影响队列，不影响当前发送帧。 */
-bool judge_take_tx(judge_tx_frame_t *frame);
-judge_tx_result_t judge_prepare_tx(judge_tx_frame_t *frame, uint8_t sequence, uint32_t now_tick, uint16_t *length);
+/* 任务中调用，登记一条待发的 0x0301 交互请求，由 Judge_Task 在串口空闲时发出，不代表服务器已执行。
+ * 只保留最新一条：上一条尚未发出时被覆盖；length 超过 JUDGE_INTERACTION_DATA_SIZE 的请求被丢弃。 */
+void judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length);
+void judge_send_sentry(const sentry_cmd_t *command);
+/* 仅 Judge_Task 调用：取走待发请求并组帧到 buffer（至少 JUDGE_FRAME_MAX_SIZE 字节），返回整帧长度；
+ * 无请求或机器人状态离线时返回 0。上一帧 DMA 结束前不得调用，以免改写发送中的 buffer。 */
+uint16_t judge_pack_tx(uint8_t *buffer, uint32_t now_tick);
 
 #endif

@@ -1,5 +1,6 @@
 #include "pid.h"
 
+#include <float.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -80,6 +81,46 @@ float pid_increment_calculate(pid_increment_t *pid, float feedback, float refere
     pid->previous_previous_error = pid->previous_error;
     pid->previous_error = pid->error;
     return pid->increment;
+}
+
+void pid_calculator_init(pid_calculator_t *pid, float kp, float ki, float kd)
+{
+    *pid = (pid_calculator_t){.kp = kp, .ki = ki, .kd = kd,
+                              .integral_min = -FLT_MAX, .integral_max = FLT_MAX,
+                              .integral_split_min = -FLT_MAX, .integral_split_max = FLT_MAX,
+                              .output_min = -FLT_MAX, .output_max = FLT_MAX,
+                              .last_error = NAN};
+}
+
+void pid_calculator_reset(pid_calculator_t *pid)
+{
+    pid->last_error = NAN;
+    pid->integral = 0.0f;
+}
+
+float pid_calculator_update(pid_calculator_t *pid, float error)
+{
+    if (!isfinite(error))
+    {
+        return NAN;
+    }
+
+    float control = pid->kp * error;
+    if (error < pid->integral_split_max && error > pid->integral_split_min)
+    {
+        control += pid->ki * pid->integral;
+        pid->integral = float_constrain(pid->integral + error, pid->integral_min, pid->integral_max);
+    }
+    else
+    {
+        pid->integral = 0.0f;
+    }
+    if (!isnan(pid->last_error))
+    {
+        control += pid->kd * (error - pid->last_error);
+    }
+    pid->last_error = error;
+    return float_constrain(control, pid->output_min, pid->output_max);
 }
 
 float float_constrain(float value, float min_value, float max_value)

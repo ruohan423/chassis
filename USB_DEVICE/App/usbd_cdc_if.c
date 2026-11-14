@@ -22,7 +22,7 @@
 #include "usbd_cdc_if.h"
 
 /* USER CODE BEGIN INCLUDE */
-#include "usb_common.h"
+#include "usb_commun.h"
 
 /* USER CODE END INCLUDE */
 

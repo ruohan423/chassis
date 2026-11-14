@@ -9,7 +9,6 @@ bool uart_rx_start(uart_rx_t *rx)
     rx->wrap_count = 0U;
     rx->error_pending = false;
 
-    /* 不在运行时覆盖 CubeMX 配置，配置未完成时交给任务周期重试。 */
     if (rx->handle->hdmarx == NULL || rx->handle->hdmarx->Init.Mode != DMA_CIRCULAR)
     {
         return false;
@@ -47,38 +46,6 @@ uint16_t uart_rx_read(uart_rx_t *rx, uint8_t *buffer, bool *overrun)
 
     rx->read_count += available;
     return (uint16_t)available;
-}
-
-bool uart_tx_is_configured(const uart_tx_t *tx)
-{
-    return tx->handle->hdmatx != NULL && tx->handle->hdmatx->Init.Mode == DMA_NORMAL;
-}
-
-HAL_StatusTypeDef uart_tx_start(uart_tx_t *tx, const uint8_t *buffer, uint16_t length)
-{
-    if (!uart_tx_is_configured(tx))
-    {
-        return HAL_ERROR;
-    }
-    tx->completed = false;
-    tx->error_pending = false;
-    const HAL_StatusTypeDef result = HAL_UART_Transmit_DMA(tx->handle, buffer, length);
-    if (result == HAL_OK)
-    {
-        __HAL_DMA_DISABLE_IT(tx->handle->hdmatx, DMA_IT_HT);
-    }
-    return result;
-}
-
-bool uart_tx_abort(uart_tx_t *tx)
-{
-    if (HAL_UART_AbortTransmit(tx->handle) != HAL_OK)
-    {
-        return false;
-    }
-    tx->completed = false;
-    tx->error_pending = false;
-    return true;
 }
 
 static uint32_t dma_write_count(const uart_rx_t *rx)
@@ -136,16 +103,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     else if (huart == judge_uart_rx.handle)
     {
         judge_uart_rx.error_pending = true;
-        judge_uart_tx.error_pending = true;
-        (void)osSemaphoreRelease(JudgeSemHandle);
-    }
-}
-
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == judge_uart_tx.handle)
-    {
-        judge_uart_tx.completed = true;
         (void)osSemaphoreRelease(JudgeSemHandle);
     }
 }

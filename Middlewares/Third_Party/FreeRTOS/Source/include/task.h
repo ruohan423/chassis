@@ -486,7 +486,7 @@ is used in assert() statements. */
 static const TaskParameters_t xCheckTaskParameters =
 {
 	vATask,		// pvTaskCode - the function that implements the task.
-	"ATask",	// pcName - just a test name for the task to assist debugging.
+	"ATask",	// pcName - just a text name for the task to assist debugging.
 	100,		// usStackDepth	- the stack size DEFINED IN WORDS.
 	NULL,		// pvParameters - passed into the task function as the function parameters.
 	( 1UL | portPRIVILEGE_BIT ),// uxPriority - task priority, set the portPRIVILEGE_BIT if the task should run in a privileged state.
@@ -572,7 +572,7 @@ static PRIVILEGED_DATA StaticTask_t xTaskBuffer;
 static const TaskParameters_t xCheckTaskParameters =
 {
 	vATask,		// pvTaskCode - the function that implements the task.
-	"ATask",	// pcName - just a test name for the task to assist debugging.
+	"ATask",	// pcName - just a text name for the task to assist debugging.
 	100,		// usStackDepth	- the stack size DEFINED IN WORDS.
 	NULL,		// pvParameters - passed into the task function as the function parameters.
 	( 1UL | portPRIVILEGE_BIT ),// uxPriority - task priority, set the portPRIVILEGE_BIT if the task should run in a privileged state.
@@ -1389,7 +1389,7 @@ UBaseType_t uxTaskGetNumberOfTasks( void ) PRIVILEGED_FUNCTION;
  * task. h
  * <PRE>char *pcTaskGetName( TaskHandle_t xTaskToQuery );</PRE>
  *
- * @return The test (human readable) name of the task referenced by the handle
+ * @return The text (human readable) name of the task referenced by the handle
  * xTaskToQuery.  A task can query its own name by either passing in its own
  * handle, or by setting xTaskToQuery to NULL.
  *

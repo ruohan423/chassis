@@ -7,12 +7,11 @@
 #include "usbcom_task.h"
 
 #include "cmsis_os2.h"
-#include "usb_common.h"
+#include "usb_commun.h"
 #include "usb_device.h"
 
 #define USB_SEND_PERIOD_MS       USB_SEND_MIN_INTERVAL_MS  /* 发送调度检查周期，单位 ms；USB 忙时保留待发数据。 */
 #define USB_RX_FRAME_TIMEOUT_MS  50U    /* 半帧等待上限，单位 ms，超时清除拼接状态。 */
-#define USB_POSTURE_MAX_AGE_MS    1000U  /* 未消费命令的最长保留时间，单位 ms，按主机调度整定，不要求周期重发。 */
 
 void UsbCom_Task(void *argument)
 {
@@ -24,7 +23,7 @@ void UsbCom_Task(void *argument)
     for (;;)
     {
         const uint32_t now_tick = osKernelGetTickCount();
-        usb_receive_process(now_tick, USB_RX_FRAME_TIMEOUT_MS, USB_POSTURE_MAX_AGE_MS);
+        usb_receive_process(now_tick, USB_RX_FRAME_TIMEOUT_MS);
         usb_send_update(now_tick);
         next_tick += USB_SEND_PERIOD_MS;
         osDelayUntil(next_tick);

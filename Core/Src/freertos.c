@@ -68,13 +68,6 @@ const osThreadAttr_t watchdog_task_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for power_task */
-osThreadId_t power_taskHandle;
-const osThreadAttr_t power_task_attributes = {
-  .name = "power_task",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
 /* Definitions for judge_task */
 osThreadId_t judge_taskHandle;
 const osThreadAttr_t judge_task_attributes = {
@@ -108,7 +101,6 @@ const osSemaphoreAttr_t JudgeSem_attributes = {
 void INS_Task(void *argument);
 void Remote_Task(void *argument);
 void Watchdog_Task(void *argument);
-void Power_Task(void *argument);
 void Judge_Task(void *argument);
 void Chassis_Task(void *argument);
 
@@ -157,9 +149,6 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of watchdog_task */
   watchdog_taskHandle = osThreadNew(Watchdog_Task, NULL, &watchdog_task_attributes);
-
-  /* creation of power_task */
-  power_taskHandle = osThreadNew(Power_Task, NULL, &power_task_attributes);
 
   /* creation of judge_task */
   judge_taskHandle = osThreadNew(Judge_Task, NULL, &judge_task_attributes);
@@ -231,24 +220,6 @@ __weak void Watchdog_Task(void *argument)
     osDelay(1);
   }
   /* USER CODE END Watchdog_Task */
-}
-
-/* USER CODE BEGIN Header_Power_Task */
-/**
-* @brief Function implementing the power_task thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_Power_Task */
-__weak void Power_Task(void *argument)
-{
-  /* USER CODE BEGIN Power_Task */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END Power_Task */
 }
 
 /* USER CODE BEGIN Header_Judge_Task */

@@ -12,7 +12,7 @@ _Static_assert(sizeof(game_result_t) == 1U, "game_result_t size");
 _Static_assert(sizeof(game_robot_hp_t) == 24U, "game_robot_hp_t size");
 _Static_assert(sizeof(event_data_t) == 8U, "event_data_t size");
 _Static_assert(sizeof(referee_warning_t) == 3U, "judge_warning_t size");
-_Static_assert(sizeof(judge_dart_info_t) == 3U, "judge_dart_info_t size");
+_Static_assert(sizeof(dart_info_t) == 3U, "dart_info_t size");
 _Static_assert(sizeof(robot_status_t) == 17U, "robot_status_t size");
 _Static_assert(sizeof(power_heat_data_t) == 14U, "power_heat_data_t size");
 _Static_assert(sizeof(robot_pos_t) == 12U, "robot_pos_t size");
@@ -122,13 +122,8 @@ static judge_received_command_t command_queue[JUDGE_COMMAND_QUEUE_DEPTH];
 static uint8_t command_head;
 static uint8_t command_count;
 static bool command_lost;
-static judge_tx_request_t tx_queue[JUDGE_TX_QUEUE_DEPTH];
-static uint8_t tx_head;
-static uint8_t tx_count;
-judge_tx_status_t judge_tx_status = {
-    .result = JUDGE_TX_NOT_READY,
-    .byte_limit_per_second = JUDGE_TX_DEFAULT_BYTE_LIMIT,
-};
+static judge_tx_request_t tx_request;
+static bool tx_pending;
 
 
 
@@ -271,8 +266,7 @@ void judge_clear(void)
     }
     command_head = 0U;
     command_count = 0U;
-    tx_head = 0U;
-    tx_count = 0U;
+    tx_pending = false;
     if (previous_lock == 0)
     {
         (void)osKernelUnlock();
@@ -308,176 +302,69 @@ judge_command_result_t judge_read_command(judge_received_command_t *command)
     return result;
 }
 
-judge_tx_result_t judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length)
+void judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length)
 {
-    const bool sentry_command = data_cmd_id == 0x0120U;
-    if ((length > 0U && data == NULL) || length > JUDGE_INTERACTION_DATA_SIZE
-        || (sentry_command && (receiver_id != 0x8080U || length != sizeof(sentry_cmd_t)))
-        || (!sentry_command && (data_cmd_id < 0x0200U || data_cmd_id > 0x02FFU)))
+    if (length > JUDGE_INTERACTION_DATA_SIZE)
     {
-        return JUDGE_TX_INVALID;
-    }
-    if (JudgeSemHandle == NULL)
-    {
-        return JUDGE_TX_NOT_READY;
+        return;
     }
 
     const int32_t previous_lock = osKernelLock();
-    if (previous_lock < 0)
+    tx_request.data_cmd_id = data_cmd_id;
+    tx_request.receiver_id = receiver_id;
+    tx_request.data_length = length;
+    memcpy(tx_request.data, data, length);
+    tx_pending = true;
+    if (previous_lock == 0)
     {
-        return JUDGE_TX_NOT_READY;
+        (void)osKernelUnlock();
     }
-    const uint32_t now_tick = osKernelGetTickCount();
-    const uint16_t sender_id = judge_data.robot_status.robot_id;
-    const uint16_t peer_id = receiver_id >= 100U ? receiver_id - 100U : receiver_id;
-    judge_tx_result_t result;
+    (void)osSemaphoreRelease(JudgeSemHandle);
+}
 
-    if (!judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick))
+void judge_send_sentry(const sentry_cmd_t *command)
+{
+    judge_send_interaction(0x0120U, 0x8080U, (const uint8_t *)command, sizeof(*command));
+}
+
+uint16_t judge_pack_tx(uint8_t *buffer, uint32_t now_tick)
+{
+    static uint8_t sequence;
+
+    const int32_t previous_lock = osKernelLock();
+    /* 发送者 ID 只能取自裁判下发的机器人状态；离线时丢弃请求，不发送错误 ID。 */
+    const bool ready = tx_pending && judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick);
+    const uint16_t data_length = tx_request.data_length + 6U;
+    tx_pending = false;
+    if (ready)
     {
-        result = JUDGE_TX_OFFLINE;
-    }
-    else if ((sender_id != 7U && sender_id != 107U)
-        || (!sentry_command && ((sender_id >= 100U) != (receiver_id >= 100U) || peer_id == 0U || peer_id == 2U || peer_id > 9U)))
-    {
-        result = JUDGE_TX_INVALID;
-    }
-    else if (judge_tx_status.result == JUDGE_TX_CONFIG_ERROR || judge_tx_status.result == JUDGE_TX_NOT_READY)
-    {
-        result = judge_tx_status.result;
-    }
-    else if (tx_count == JUDGE_TX_QUEUE_DEPTH)
-    {
-        result = JUDGE_TX_QUEUE_FULL;
-    }
-    else
-    {
-        judge_tx_request_t *request = &tx_queue[(tx_head + tx_count) % JUDGE_TX_QUEUE_DEPTH];
-        request->data_cmd_id = data_cmd_id;
-        request->sender_id = sender_id;
-        request->receiver_id = receiver_id;
-        if (length > 0U)
-        {
-            memcpy(request->data, data, length);
-        }
-        request->data_length = length;
-        request->queued_tick = now_tick;
-        tx_count++;
-        result = JUDGE_TX_QUEUED;
+        buffer[7] = (uint8_t)tx_request.data_cmd_id;
+        buffer[8] = (uint8_t)(tx_request.data_cmd_id >> 8);
+        buffer[9] = (uint8_t)judge_data.robot_status.robot_id;
+        buffer[10] = (uint8_t)(judge_data.robot_status.robot_id >> 8);
+        buffer[11] = (uint8_t)tx_request.receiver_id;
+        buffer[12] = (uint8_t)(tx_request.receiver_id >> 8);
+        memcpy(&buffer[13], tx_request.data, tx_request.data_length);
     }
     if (previous_lock == 0)
     {
         (void)osKernelUnlock();
     }
-    if (result == JUDGE_TX_QUEUED)
+    if (!ready)
     {
-        (void)osSemaphoreRelease(JudgeSemHandle);
-    }
-    return result;
-}
-
-judge_tx_result_t judge_send_sentry(const sentry_cmd_t *command)
-{
-    if (command == NULL)
-    {
-        return JUDGE_TX_INVALID;
-    }
-    const uint8_t data[4] = {
-        (uint8_t)command->sentry_cmd, (uint8_t)(command->sentry_cmd >> 8),
-        (uint8_t)(command->sentry_cmd >> 16), (uint8_t)(command->sentry_cmd >> 24),
-    };
-    return judge_send_interaction(0x0120U, 0x8080U, data, sizeof(data));
-}
-
-void judge_set_tx_bandwidth(uint16_t bytes_per_second)
-{
-    const int32_t previous_lock = osKernelLock();
-    judge_tx_status.byte_limit_per_second = bytes_per_second;
-    if (previous_lock == 0)
-    {
-        (void)osKernelUnlock();
-    }
-    if (JudgeSemHandle != NULL)
-    {
-        (void)osSemaphoreRelease(JudgeSemHandle);
-    }
-}
-
-void judge_read_tx_status(judge_tx_status_t *status)
-{
-    const int32_t previous_lock = osKernelLock();
-    *status = judge_tx_status;
-    if (previous_lock == 0)
-    {
-        (void)osKernelUnlock();
-    }
-}
-
-bool judge_take_tx(judge_tx_frame_t *frame)
-{
-    const int32_t previous_lock = osKernelLock();
-    const bool available = tx_count > 0U;
-    if (available)
-    {
-        const judge_tx_request_t *request = &tx_queue[tx_head];
-        frame->data_cmd_id = request->data_cmd_id;
-        frame->sender_id = request->sender_id;
-        frame->receiver_id = request->receiver_id;
-        frame->data_length = request->data_length;
-        frame->queued_tick = request->queued_tick;
-        memcpy(frame->buffer + 13U, request->data, request->data_length);
-        tx_head = (tx_head + 1U) % JUDGE_TX_QUEUE_DEPTH;
-        tx_count--;
-    }
-    if (previous_lock == 0)
-    {
-        (void)osKernelUnlock();
-    }
-    return available;
-}
-
-judge_tx_result_t judge_prepare_tx(judge_tx_frame_t *frame, uint8_t sequence, uint32_t now_tick, uint16_t *length)
-{
-    const uint32_t age_ticks = (osKernelGetTickFreq() * JUDGE_TX_MAX_AGE_MS + 999U) / 1000U;
-    if (now_tick - frame->queued_tick >= age_ticks)
-    {
-        return JUDGE_TX_EXPIRED;
-    }
-    const int32_t previous_lock = osKernelLock();
-    const bool current_source = judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, now_tick)
-        && judge_data.robot_status.robot_id == frame->sender_id;
-    if (previous_lock == 0)
-    {
-        (void)osKernelUnlock();
-    }
-    if (!current_source)
-    {
-        return JUDGE_TX_OFFLINE;
+        return 0U;
     }
 
-    /* 等待发送期间仍检查时效与发送者，只复用已完成的组帧和 CRC。 */
-    if (*length != 0U)
-    {
-        return JUDGE_TX_READY;
-    }
-
-    uint8_t *buffer = frame->buffer;
-    const uint16_t data_length = frame->data_length + 6U;
     buffer[0] = 0xA5U;
     buffer[1] = (uint8_t)data_length;
     buffer[2] = (uint8_t)(data_length >> 8);
-    buffer[3] = sequence;
+    buffer[3] = sequence++;
     buffer[4] = crc8(buffer, JUDGE_FRAME_HEADER_SIZE - 1U);
     buffer[5] = 0x01U;
     buffer[6] = 0x03U;
-    buffer[7] = (uint8_t)frame->data_cmd_id;
-    buffer[8] = (uint8_t)(frame->data_cmd_id >> 8);
-    buffer[9] = (uint8_t)frame->sender_id;
-    buffer[10] = (uint8_t)(frame->sender_id >> 8);
-    buffer[11] = (uint8_t)frame->receiver_id;
-    buffer[12] = (uint8_t)(frame->receiver_id >> 8);
-    *length = data_length + JUDGE_FRAME_OVERHEAD;
-    const uint16_t frame_crc16 = crc16(buffer, *length - sizeof(frame_tail_t));
-    buffer[*length - 2U] = (uint8_t)frame_crc16;
-    buffer[*length - 1U] = (uint8_t)(frame_crc16 >> 8);
-    return JUDGE_TX_READY;
+    const uint16_t frame_length = data_length + JUDGE_FRAME_OVERHEAD;
+    const uint16_t frame_crc16 = crc16(buffer, frame_length - 2U);
+    buffer[frame_length - 2U] = (uint8_t)frame_crc16;
+    buffer[frame_length - 1U] = (uint8_t)(frame_crc16 >> 8);
+    return frame_length;
 }

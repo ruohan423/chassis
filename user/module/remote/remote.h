@@ -54,12 +54,17 @@ typedef union {
     } bits;
 } Key_t;
 
+typedef struct {
+    int16_t ch4;
+} dial_t;
+
 /* 遥控器整体数据 */
 typedef struct {
     Remote rc;
     Mouse  mouse;
     Key_t  key;
     Key_t  lastkey;
+    dial_t dial;
 } RC_Ctl_t;
 
 /* 输入模式 */

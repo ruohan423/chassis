@@ -37,6 +37,7 @@ void remote_clear(void) {
     rc_data.rc.ch3 = RC_STICK_OFFSET;
     rc_data.rc.s1  = 2;
     rc_data.rc.s2  = 1;
+    rc_data.dial.ch4 = RC_STICK_OFFSET;
 
     rc_data.mouse.x = rc_data.mouse.y = rc_data.mouse.z = 0;
     rc_data.mouse.press_l = rc_data.mouse.press_r = 0;
@@ -79,6 +80,9 @@ void remote_rx(unsigned char *RxMsg) {
 
     /* 键盘：整体赋值到 union.value */
     rc_data.key.value = (uint16_t)(RxMsg[14] | (RxMsg[15] << 8));
+
+    /* 拨轮通道：固定帧末尾两个字节为 11 位原始通道值。 */
+    rc_data.dial.ch4 = (int16_t)((RxMsg[16] | (RxMsg[17] << 8)) & 0x07FFU);
 
     /* 模式分发 */
     switch (rc_data.rc.s2) {

@@ -1,6 +1,3 @@
-/* rls.c
- *此移植标量展开.
- */
 #include "rls.h"
 
 #include <assert.h>

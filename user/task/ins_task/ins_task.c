@@ -8,7 +8,8 @@
 // 创建日期：2026/10/7。
 //
 #include "ins_task.h"
-#include "usb_common.h"
+#include "can_commun.h"
+#include "usb_commun.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -81,6 +82,7 @@ void INS_Task(void *argument)
 
         quat_to_euler_deg(quat6d, euler_deg);
         quat_rotate_vector(quat6d, accel, accel_earth);
+        const float yaw_rad = euler_deg[2] * 0.01745329252f;
 
         const int32_t previous_lock = osKernelLock();
         ins_output.roll_deg = euler_deg[0];
@@ -89,11 +91,12 @@ void INS_Task(void *argument)
         ins_output.accel_earth_x = accel_earth[0];
         ins_output.accel_earth_y = accel_earth[1];
         ins_output.accel_earth_z = accel_earth[2];
-        usb_chassis_yaw_deg = euler_deg[2];
         if (previous_lock == 0)
         {
             (void)osKernelRestoreLock(previous_lock);
         }
+        usb_commun_update_imu(yaw_rad, gyro[2]);
+        can_commun_update_imu(yaw_rad, gyro[2]);
 
         next_tick += 1U;
         osDelayUntil(next_tick);

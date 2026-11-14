@@ -82,32 +82,28 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/judge/judge.h
         user/module/supercapacitor/super_capacitor.c
         user/module/supercapacitor/super_capacitor.h
-        user/control/chassis/chassis_controller/chassis_controller.c
-        user/control/chassis/chassis_controller/chassis_controller.h
         user/control/heater/heater.c
         user/control/heater/heater.h
-        user/control/chassis/power_controller/power_controller.c
-        user/control/chassis/power_controller/power_controller.h
         user/algorithm/rls/rls.c
         user/algorithm/rls/rls.h
-        user/control/chassis/chassis_external/chassis.c
-        user/control/chassis/chassis_external/chassis.h
+        user/algorithm/qcp/qcp_solver.c
+        user/algorithm/qcp/qcp_solver.h
+        user/control/chassis/chassis.c
+        user/control/chassis/chassis.h
         user/control/chassis/chassis_config.h
-        user/control/chassis/chassis_port/chassis_port.c
-        user/control/chassis/chassis_port/chassis_port.h
-        user/task/power_task/power_task.c
-        user/task/power_task/power_task.h
+        user/control/chassis/chassis_port.c
+        user/control/chassis/chassis_port.h
         user/task/remote_task/remote_task.h
         user/task/ins_task/ins_task.h
         user/task/chassis_task/chassis_task.h
-        user/control/commun/usb_common.c
-        user/control/commun/usb_common.h
-        user/control/commun/can_common.c
-        user/control/commun/can_common.h
-        user/task/common_task/usbcom_task.c
-        user/task/common_task/usbcom_task.h
-        user/task/common_task/cancom_task.c
-        user/task/common_task/cancom_task.h
+        user/control/commun/usb_commun.c
+        user/control/commun/usb_commun.h
+        user/control/commun/can_commun.c
+        user/control/commun/can_commun.h
+        user/task/commun_task/usbcom_task.c
+        user/task/commun_task/usbcom_task.h
+        user/task/commun_task/cancom_task.c
+        user/task/commun_task/cancom_task.h
 )
 
 # Add STM32CubeMX generated sources
@@ -137,7 +133,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user
         ${CMAKE_SOURCE_DIR}/user/control/commun
-        ${CMAKE_SOURCE_DIR}/user/task/common_task
+        ${CMAKE_SOURCE_DIR}/user/task/commun_task
         ${CMAKE_SOURCE_DIR}/user/algorithm/calibration
         ${CMAKE_SOURCE_DIR}/user/algorithm/pid
         ${CMAKE_SOURCE_DIR}/user/algorithm/vqf
@@ -154,18 +150,14 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/task/chassis_task
         ${CMAKE_SOURCE_DIR}/user/task/ins_task
         ${CMAKE_SOURCE_DIR}/user/task/judge_task
-        ${CMAKE_SOURCE_DIR}/user/task/power_task
         ${CMAKE_SOURCE_DIR}/user/task/remote_task
         ${CMAKE_SOURCE_DIR}/user/task/watch_task
         ${CMAKE_SOURCE_DIR}/user/task/test
         ${CMAKE_SOURCE_DIR}/user/control/chassis
-        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_external
-        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_port
-        ${CMAKE_SOURCE_DIR}/user/control/chassis/chassis_controller
-        ${CMAKE_SOURCE_DIR}/user/control/chassis/power_controller
         ${CMAKE_SOURCE_DIR}/user/control/heater
         ${CMAKE_SOURCE_DIR}/user/algorithm/ramp
         ${CMAKE_SOURCE_DIR}/user/algorithm/rls
+        ${CMAKE_SOURCE_DIR}/user/algorithm/qcp
         ${CMAKE_SOURCE_DIR}/user/module/judge
         ${CMAKE_SOURCE_DIR}/user/module/supercapacitor
     # Add user defined include paths
