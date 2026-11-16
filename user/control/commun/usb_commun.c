@@ -1,5 +1,6 @@
 #include "usb_commun.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -7,6 +8,7 @@
 #include "task.h"
 #include "cmsis_os2.h"
 
+#include "can_commun.h"
 #include "judge.h"
 #include "usb_device.h"
 #include "usbd_cdc_if.h"
@@ -24,14 +26,18 @@ _Static_assert(sizeof(float) == 4U && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
 _Static_assert(sizeof(bool) == 1U, "USB 协议要求 bool 占 1 字节");
 _Static_assert(offsetof(receive_cmd_t, data) == 8U, "USB 控制帧数据偏移不匹配");
 _Static_assert(offsetof(receive_cmd_t, data.chassis_spin) == 20U, "USB 小陀螺字段偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.gimabal_model) == 21U, "USB 云台模式字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.pitch_cmd) == 21U, "USB 小云台升降字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.gimabal_model) == 22U, "USB 云台模式字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.gimabal_tar_angle) == 24U, "USB 云台目标角字段偏移不匹配");
 _Static_assert(offsetof(receive_cmd_t, data.activate_energy) == 32U, "USB 能量机关字段偏移不匹配");
 _Static_assert(sizeof(receive_cmd_t) == 40U, "USB 控制帧大小不匹配");
 _Static_assert(offsetof(receive_sentry_t, data) == 8U, "USB 哨兵指令帧数据偏移不匹配");
 _Static_assert(offsetof(receive_sentry_t, eof) == 12U, "USB 哨兵指令帧尾偏移不匹配");
 _Static_assert(sizeof(receive_sentry_t) == 16U, "USB 哨兵指令帧大小不匹配");
 _Static_assert(offsetof(send_cmd_t, data) == 8U, "USB 状态帧数据偏移不匹配");
-_Static_assert(sizeof(send_cmd_t) == 20U, "USB 状态帧大小不匹配");
+_Static_assert(offsetof(send_cmd_t, data.pitch_status) == 16U, "USB 小云台状态字段偏移不匹配");
+_Static_assert(offsetof(send_cmd_t, eof) == 20U, "USB 状态帧尾偏移不匹配");
+_Static_assert(sizeof(send_cmd_t) == 24U, "USB 状态帧大小不匹配");
 _Static_assert(sizeof(ground_robot_position_t) == 40U, "USB 地面机器人位置载荷大小不匹配");
 
 static send_cmd_t chassis_packet = {
@@ -130,6 +136,7 @@ static uint32_t last_receive_tick;
 static receive_cmd_t received_command;
 static bool command_pending;
 
+/* CDC 异步发送会持有 buffer；仅接收模块静态缓冲区，TxState 清零前调用方不得修改或复用。 */
 static bool usb_transmit(uint8_t *buffer, uint16_t length);
 static bool usb_send_chassis(uint32_t now_tick);
 static usb_send_result_t usb_send_judge_data(uint32_t now_tick, uint8_t index);
@@ -217,6 +224,10 @@ static bool usb_transmit(uint8_t *buffer, uint16_t length)
 
 static bool usb_send_chassis(uint32_t now_tick)
 {
+    static gimbal_data_t gimbal_feedback;
+    /* 云台板反馈超时时两个状态位按 0 上报，不沿用离线前的旧值。 */
+    const bool gimbal_online = can_commun_read_gimbal_data(&gimbal_feedback);
+
     memset(&chassis_packet, 0, sizeof(chassis_packet));
     chassis_packet.frame_timestamp = now_tick;
     const int32_t previous_lock = osKernelLock();
@@ -230,6 +241,8 @@ static bool usb_send_chassis(uint32_t now_tick)
     {
         (void)osKernelRestoreLock(previous_lock);
     }
+    chassis_packet.data.pitch_status = gimbal_online && gimbal_feedback.pitch_status;
+    chassis_packet.data.energy_mechanis_done = gimbal_online && gimbal_feedback.energy_mechanis_done;
     chassis_packet.frame_header = 0x1001U;
     chassis_packet.eof = 0xA5U;
     return usb_transmit((uint8_t *)&chassis_packet, sizeof(chassis_packet));
@@ -305,7 +318,7 @@ void usb_receive_from_isr(uint8_t *buffer, uint32_t length)
 
 void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
 {
-    uint8_t data[CDC_DATA_FS_OUT_PACKET_SIZE];
+    static uint8_t packet_data[CDC_DATA_FS_OUT_PACKET_SIZE];
     uint32_t length = 0U;
 
     /* 只在交接区内取走一包并重装端点，拼帧和校验在临界区外执行。 */
@@ -333,7 +346,7 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
     if (receive_endpoint_buffer != NULL)
     {
         length = receive_length;
-        memcpy(data, receive_buffer, length);
+        memcpy(packet_data, receive_buffer, length);
         receive_length = 0U;
         /* 清长度后重试重装，不重复入队；退出交接区后 ISR 可以接收下一包。 */
         if (USBD_CDC_SetRxBuffer(&hUsbDeviceFS, receive_endpoint_buffer) == USBD_OK
@@ -350,7 +363,7 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
     }
     for (uint32_t index = 0U; index < length; index++)
     {
-        receive_frame[receive_frame_length++] = data[index];
+        receive_frame[receive_frame_length++] = packet_data[index];
         /* 帧头决定帧长；滑动后剩余字节里可能已有完整短帧，需循环处理到数据不足为止。 */
         while (receive_frame_length >= sizeof(uint32_t))
         {
@@ -369,6 +382,7 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
                 const bool valid = frame_header == USB_CONTROL_FRAME_HEADER
                     ? (receive_frame[offsetof(receive_cmd_t, eof)] == 0xA5U
                        && receive_frame[offsetof(receive_cmd_t, data.chassis_spin)] <= 1U
+                       && receive_frame[offsetof(receive_cmd_t, data.pitch_cmd)] <= 1U
                        && receive_frame[offsetof(receive_cmd_t, data.gimabal_model)] <= 2U
                        && receive_frame[offsetof(receive_cmd_t, data.activate_energy)] <= 1U)
                     : receive_frame[offsetof(receive_sentry_t, eof)] == 0xA5U;
@@ -388,7 +402,22 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
                         receive_frame_length = 0U;
                         return;
                     }
-                    if (frame_header == USB_SENTRY_FRAME_HEADER)
+                    if (frame_header == USB_CONTROL_FRAME_HEADER)
+                    {
+                        gimbal_active_t active = {
+                            .pitch_cmd = receive_frame[offsetof(receive_cmd_t, data.pitch_cmd)] != 0U,
+                            .gimabal_model = receive_frame[offsetof(receive_cmd_t, data.gimabal_model)],
+                            .activate_energy = receive_frame[offsetof(receive_cmd_t, data.activate_energy)] != 0U,
+                        };
+                        memcpy(&active.gimabal_tar_angle, &receive_frame[offsetof(receive_cmd_t, data.gimabal_tar_angle)], sizeof(active.gimabal_tar_angle));
+                        memcpy(&active.gimabal_pat_angle, &receive_frame[offsetof(receive_cmd_t, data.gimabal_pat_angle)], sizeof(active.gimabal_pat_angle));
+                        /* 云台指令交给 CAN 通信模块，由 CanCom_Task 周期发往云台板；角度非有限值的帧不转发，也不刷新云台指令时间。 */
+                        if (isfinite(active.gimabal_tar_angle) && isfinite(active.gimabal_pat_angle))
+                        {
+                            can_commun_update_gimbal_active(&active);
+                        }
+                    }
+                    else
                     {
                         /* 登记为 0x0301/0x0120 请求，由 Judge_Task 按裁判串口限频发出；只保留最新一条。 */
                         judge_send_sentry((const sentry_cmd_t *)&receive_frame[offsetof(receive_sentry_t, data)]);

@@ -33,7 +33,7 @@ void RLS_construct(RLS *r, float delta_, float lambda_)
     RLS_validate(r);
 }
 
-void RLS_constructWithParam(RLS *r, float delta_, float lambda_, const float initParam[RLS_DIM])
+void RLS_constructWithParam(RLS *r, float delta_, float lambda_, const float *initParam)
 {
     int i;
     RLS_construct(r, delta_, lambda_);
@@ -44,7 +44,7 @@ void RLS_constructWithParam(RLS *r, float delta_, float lambda_, const float ini
  * paramsVector += gainVector * (actualOutput - phi'*paramsVector)
  * transMatrix  = (P - gainVector*phi'*P) / lambda
  */
-const float *RLS_update(RLS *r, const float sampleVector[RLS_DIM], float actualOutput, uint32_t nowTick)
+const float *RLS_update(RLS *r, const float *sampleVector, float actualOutput, uint32_t nowTick)
 {
     const float *phi = sampleVector;
     float (*P)[RLS_DIM] = r->transMatrix;
@@ -76,7 +76,7 @@ const float *RLS_update(RLS *r, const float sampleVector[RLS_DIM], float actualO
     return r->paramsVector;
 }
 
-void RLS_setParamVector(RLS *r, const float updatedParams[RLS_DIM])
+void RLS_setParamVector(RLS *r, const float *updatedParams)
 {
     int i;
     for (i = 0; i < RLS_DIM; i++) {

@@ -37,8 +37,8 @@ static uint32_t last_valid_frame_tick;
 static bool has_valid_frame;
 
 static void process_received_data(const uint8_t *data, uint16_t data_length, bool dma_overrun);
-static void RemoteCallback(Remote *rc);
-static void MouseKeyCallback(Mouse *mouse, Key_t key, Key_t lastkey);
+static void RemoteCallback(const Remote *rc);
+static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey);
 static void StopCallback(void);
 
 void Remote_Task(void *argument)
@@ -107,7 +107,7 @@ static void process_received_data(const uint8_t *data, uint16_t data_length, boo
 }
 
 
-static void RemoteCallback(Remote *rc)
+static void RemoteCallback(const Remote *rc)
 {
     if (actChassis == CHASSIS_STOP){
 
@@ -135,7 +135,7 @@ static void RemoteCallback(Remote *rc)
 }
 
 
-static void MouseKeyCallback(Mouse *mouse, Key_t key, Key_t lastkey)
+static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey)
 {
     (void)mouse;
     (void)key;

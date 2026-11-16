@@ -12,6 +12,7 @@ typedef struct
     uint32_t timeout_ms;
 } watchdog_swdg_t;
 
+/* watchdog 为调用方持有的可写状态，在监控期间保持有效；模块不会保存额外指针。 */
 void watchdog_swdg_init(watchdog_swdg_t *watchdog, uint32_t timeout_ms);
 void watchdog_swdg_feed(watchdog_swdg_t *watchdog);
 bool watchdog_swdg_is_expired(const watchdog_swdg_t *watchdog);

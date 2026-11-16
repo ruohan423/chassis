@@ -46,23 +46,23 @@ typedef struct
     gyro_bias_t result;
 } cal_session_t;
 
-/* 填充 BMI088/Rust 兼容的预热和静止校准默认配置。 */
+/* config 为调用方持有的输出对象，仅在调用期间写入且不保存指针。 */
 void cal_session_default(cal_session_cfg_t *config);
 
-/* 初始化会话。 */
+/* session 为调用方持有的可写状态；config 仅在调用期间只读借用并复制，函数不会保存指针。 */
 void cal_session_init(cal_session_t *session, const cal_session_cfg_t *config);
 
-/* 启动温度预热和静止采集流程。 */
+/* session 必须保持有效到会话结束，函数会修改其内部状态但不会保存额外指针。 */
 void cal_session_start(cal_session_t *session);
 
-/* 向当前会话输入一个国际单位制 IMU 样本。 */
-cal_status_t cal_session_push(cal_session_t *session, uint32_t time_ms, const float gyr[CAL_AXES],
-                              const float acc[CAL_AXES], bool acc_ready, float temp_c);
+/* 向当前会话输入一个国际单位制 IMU 样本；输入数组仅在调用期间借用，不会被保存或修改。 */
+cal_status_t cal_session_push(cal_session_t *session, uint32_t time_ms, const float *gyr,
+                              const float *acc, bool acc_ready, float temp_c);
 
-/* 返回当前会话状态。 */
+/* session 仅在调用期间只读借用。 */
 cal_session_state_t cal_session_state(const cal_session_t *session);
 
-/* 返回校准结果，仅在 cal_session_push 返回 CAL_OK 后有效。 */
+/* 返回 session 内部只读结果，不转移所有权；仅在 cal_session_push 返回 CAL_OK 后且 session 有效期间可用。 */
 const gyro_bias_t *cal_session_result(const cal_session_t *session);
 
 #endif

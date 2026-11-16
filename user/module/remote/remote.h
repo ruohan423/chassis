@@ -77,14 +77,16 @@ typedef enum {
 extern RC_Ctl_t rc_data;
 
 /* 回调函数指针类型 */
-typedef void (*RemoteControlCallback)(Remote *rc);
-typedef void (*MouseKeyControlCallback)(Mouse *mouse, Key_t key, Key_t lastkey);
+/* 回调参数指向模块内部状态，仅在回调执行期间只读借用，回调不得保存指针。 */
+typedef void (*RemoteControlCallback)(const Remote *rc);
+typedef void (*MouseKeyControlCallback)(const Mouse *mouse, Key_t key, Key_t lastkey);
 typedef void (*StopControlCallback)(void);
 
 /* 注册三个回调；传 NULL 使用默认空实现 */
 void Remote_RegisterCallbacks(RemoteControlCallback remoteCb,MouseKeyControlCallback mouseKeyCb,StopControlCallback stopCb);
 
 bool remote_frame_is_valid(const uint8_t *frame);
-void remote_rx(unsigned char *RxMsg);
+/* frame 为调用方持有的 18 字节只读帧，仅在调用期间借用，函数不会保存指针。 */
+void remote_rx(const uint8_t *frame);
 void remote_clear(void);
 #endif //SENTRY_CHASSIS_REMOTE_H

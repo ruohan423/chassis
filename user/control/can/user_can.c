@@ -101,6 +101,7 @@ HAL_StatusTypeDef user_can_send(CAN_HandleTypeDef *handle, uint32_t standard_id,
     uint8_t payload[USER_CAN_DATA_LENGTH] = {0};
     uint32_t mailbox;
 
+    if (handle == NULL || data == NULL || standard_id > 0x7FFU || length > USER_CAN_DATA_LENGTH){return HAL_ERROR;}
     if (HAL_CAN_GetTxMailboxesFreeLevel(handle) == 0U){return HAL_BUSY;}
 
     memcpy(payload, data, length);

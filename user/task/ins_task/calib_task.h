@@ -10,8 +10,10 @@ void Calib_Task(void *argument);
 bool Calib_TaskStart(void);
 bool Calib_IsReady(void);
 bool Calib_IsFailed(void);
-void Calib_ReadImu(float gyro[CAL_AXES], float accel[CAL_AXES], float *temperature_c);
+/* gyro、accel 分别至少有三个 float，temperature_c 指向一个 float；函数仅在调用期间写入，不保存指针。 */
+void Calib_ReadImu(float *gyro, float *accel, float *temperature_c);
 bool Calib_IsAccelReady(void);
-void Calib_GetBias(float bias[CAL_AXES], float *sigma);
+/* bias 至少有三个 float，sigma 指向一个 float；函数仅在调用期间写入，不保存指针。 */
+void Calib_GetBias(float *bias, float *sigma);
 
 #endif

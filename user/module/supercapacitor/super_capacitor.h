@@ -19,14 +19,16 @@ typedef struct
     float chassis_voltage_v;  /* 底盘母线电压，单位 V */
 } super_capacitor_data_t;
 
-/* 解析一帧状态数据并刷新在线时间。调用上下文待接线时确定；
+/* 解析一帧状态数据并刷新在线时间；data 在调用期间保持有效，不会被保存或修改。调用上下文待接线时确定；
  * 若在 CAN 接收中断中调用，读取方须改用任务/ISR 临界区保护，调度锁不能覆盖中断。 */
-void super_capacitor_update_status(const uint8_t data[SUPER_CAPACITOR_STATUS_LENGTH]);
+void super_capacitor_update_status(const uint8_t *data);
+/* 返回模块内部只读状态，不转移所有权；后续状态更新会改变其内容，调用方不得写入或异步长期持有快照语义。 */
 const super_capacitor_data_t *super_capacitor_get_data(void);
 
 /* 保存控制层给出的充电功率上限（单位 W）和输出使能，供组帧使用。 */
 void super_capacitor_set_command(float charge_power_limit_w, bool enabled);
 /* 按当前保存的指令生成载荷：字节 0 为充电功率上限（0～255 W），字节 1 为使能。 */
-void super_capacitor_build_command(uint8_t data[SUPER_CAPACITOR_COMMAND_LENGTH]);
+/* data 由调用方提供，至少有 SUPER_CAPACITOR_COMMAND_LENGTH 字节，仅在调用期间写入。 */
+void super_capacitor_build_command(uint8_t *data);
 
 #endif //SENTRY_CHASSIS_SUPERCAPACITOR_H

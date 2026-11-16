@@ -6,11 +6,11 @@ RC_Ctl_t rc_data = {.rc = {1024, 1024, 1024, 1024, 1, 1}};
 #define REMOTE_CHANNEL_MAX 1800U
 
 /* 默认空实现 */
-static void remote_control_default(Remote *rc) {
+static void remote_control_default(const Remote *rc) {
     (void)rc;
 }
 
-static void mouse_key_control_default(Mouse *mouse, Key_t key, Key_t lastkey) {
+static void mouse_key_control_default(const Mouse *mouse, Key_t key, Key_t lastkey) {
     (void)mouse;
     (void)key;
     (void)lastkey;
@@ -60,7 +60,7 @@ bool remote_frame_is_valid(const uint8_t *RxMsg)
         && (ch3 >= REMOTE_CHANNEL_MIN) && (ch3 <= REMOTE_CHANNEL_MAX);
 }
 
-void remote_rx(unsigned char *RxMsg) {
+void remote_rx(const uint8_t *RxMsg) {
     /* 摇杆 */
     rc_data.rc.ch0 = (int16_t)((RxMsg[0] | (RxMsg[1] << 8)) & 0x07FF);
     rc_data.rc.ch1 = (int16_t)(((RxMsg[1] >> 3) | (RxMsg[2] << 5)) & 0x07FF);

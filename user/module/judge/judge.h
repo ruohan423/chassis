@@ -192,6 +192,18 @@ typedef struct __attribute__((packed))
     float reserved4;        //保留位
 } ground_robot_position_t;
 
+
+//全自动无该 0x303
+typedef struct __attribute__((packed))
+{
+    float target_position_x;       /* 单位：m */
+    float target_position_y;       /* 单位：m */
+    uint8_t cmd_keyboard;          //云台手按下的键盘按键通用键值
+    uint8_t target_robot_id;        //对方机器人id
+    uint16_t cmd_source;            //信息来源
+} map_command_t;
+
+
 /* ID: 0x020D   Byte:   14 	哨兵自主决策信息同步 */
 typedef struct __attribute__((packed))
 {
@@ -199,6 +211,9 @@ typedef struct __attribute__((packed))
     uint16_t sentry_info_2;
     uint64_t sentry_info_3;
 } sentry_info_t;
+
+
+/*send*/
 
 //哨兵自主决策指令：0x0120
 typedef struct __attribute__((packed))
@@ -217,15 +232,28 @@ typedef struct __attribute__((packed))
 } robot_interaction_data_t;
 
 
-
+/* id 0x307  选手端小地图接收路径数据*/
 typedef struct __attribute__((packed))
 {
-    float target_position_x;       /* 单位：m */
-    float target_position_y;       /* 单位：m */
-    uint8_t cmd_keyboard;
-    uint8_t target_robot_id;
-    uint16_t cmd_source;
-} map_command_t;
+    uint8_t intention;          //1：到目标点攻击 2：到目标点防守 3：移动到目标点
+    uint16_t start_position_x;  //路径起点 x 轴坐标，单位：dm
+    uint16_t start_position_y;  //路径起点 y 轴坐标，单位：dm
+    int8_t delta_x[49];         //路径点 x 轴增量数组，单位：dm
+    int8_t delta_y[49];         //路径点 y 轴增量数组，单位：dm
+    uint16_t sender_id;         //发送者 ID
+}map_data_t;
+
+/*id 0x308  己方机器人可通过常规链路向己方任意选手端发送自定义的消息*/
+typedef  struct __attribute__((packed))
+{
+    uint16_t sender_id;
+    uint16_t receiver_id;
+    uint8_t user_data[30];
+}custom_info_t;
+
+
+
+
 
 typedef enum
 {
@@ -303,17 +331,19 @@ typedef struct
 } judge_tx_request_t;
 
 /* 接收、清空、拼帧复位仅由 Judge_Task 调用；时间单位为 CMSIS-OS2 tick。
- * 接收返回是否识别到支持的有效命令，队列满时仍维持接收链路时效。 */
+ * data 为调用方持有的只读字节流，仅在调用期间借用；接收返回是否识别到支持的有效命令，队列满时仍维持接收链路时效。 */
 bool judge_receive(const uint8_t *data, uint16_t length, uint32_t now_tick);
 void judge_clear(void);
 void judge_reset_parser(void);
 
+/* data 仅在调用期间只读借用；函数不会保存指针。 */
 bool judge_data_is_fresh(const judge_data_package_t *data, judge_data_id_t id, uint32_t now_tick);
 /* 0x0301/0x0303 保序入队，满时丢新；LOST 表示队列溢出或接收流重置（包括初始化）。 */
+/* command 为调用方输出对象，仅在返回 READY 时写入且不保存指针。 */
 judge_command_result_t judge_read_command(judge_received_command_t *command);
 
 /* 任务中调用，登记一条待发的 0x0301 交互请求，由 Judge_Task 在串口空闲时发出，不代表服务器已执行。
- * 只保留最新一条：上一条尚未发出时被覆盖；length 超过 JUDGE_INTERACTION_DATA_SIZE 的请求被丢弃。 */
+ * data 仅在调用期间只读借用并复制；只保留最新一条，上一条尚未发出时被覆盖；超长请求被丢弃。 */
 void judge_send_interaction(uint16_t data_cmd_id, uint16_t receiver_id, const uint8_t *data, uint16_t length);
 void judge_send_sentry(const sentry_cmd_t *command);
 /* 仅 Judge_Task 调用：取走待发请求并组帧到 buffer（至少 JUDGE_FRAME_MAX_SIZE 字节），返回整帧长度；

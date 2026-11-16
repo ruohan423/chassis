@@ -96,7 +96,8 @@ extern unsigned char bmi088_accel_init(void);
 extern unsigned char bmi088_gyro_init(void);
 extern uint8_t BMI088_accel_data_ready(void);
 
-extern void BMI088_read(float gyro[3], float accel[3], float *temperate);
+/* gyro、accel 分别至少有三个 float，temperate 指向一个 float；仅在调用期间写入且不会保存指针。 */
+extern void BMI088_read(float *gyro, float *accel, float *temperate);
 
 
 

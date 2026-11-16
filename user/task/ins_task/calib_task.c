@@ -79,7 +79,7 @@ bool Calib_IsFailed(void)
     return calibration_failed;
 }
 
-void Calib_ReadImu(float gyro[CAL_AXES], float accel[CAL_AXES], float *temperature_c)
+void Calib_ReadImu(float *gyro, float *accel, float *temperature_c)
 {
     BMI088_read(gyro, accel, temperature_c);
 }
@@ -90,7 +90,7 @@ bool Calib_IsAccelReady(void)
 }
 
 /* 仅在 Calib_IsReady 为真后调用 */
-void Calib_GetBias(float bias[CAL_AXES], float *sigma)
+void Calib_GetBias(float *bias, float *sigma)
 {
     for (uint32_t axis = 0U; axis < CAL_AXES; ++axis) bias[axis] = calibrated_bias[axis];
     *sigma = calibrated_sigma;
@@ -98,8 +98,8 @@ void Calib_GetBias(float bias[CAL_AXES], float *sigma)
 
 static bool run_gyro_cal(void)
 {
-    float gyro[CAL_AXES];
-    float accel[CAL_AXES];
+    static float gyro_sample[CAL_AXES];
+    static float accel_sample[CAL_AXES];
     uint32_t next_tick = osKernelGetTickCount();
     uint32_t last_heater_tick = next_tick;
     bool heater_update_due = true;
@@ -115,7 +115,7 @@ static bool run_gyro_cal(void)
         const cal_session_state_t previous_state = cal_session_state(&calibration_session);
         cal_status_t status;
 
-        Calib_ReadImu(gyro, accel, &sensor_temp_c);
+        Calib_ReadImu(gyro_sample, accel_sample, &sensor_temp_c);
         if (heater_update_due || (float)(now_tick - last_heater_tick) * 0.001f >= HEATER_CONTROL_PERIOD_S)
         {
             /* 首次更新间隔为 0，至少按 1ms 计算避免 PID 微分除零 */
@@ -125,7 +125,8 @@ static bool run_gyro_cal(void)
             heater_update_due = false;
         }
 
-        status = cal_session_push(&calibration_session, now_tick, gyro, accel, Calib_IsAccelReady(), sensor_temp_c);
+        status = cal_session_push(&calibration_session, now_tick, gyro_sample, accel_sample,
+                                  Calib_IsAccelReady(), sensor_temp_c);
         if (previous_state == CAL_SESSION_WARMUP && cal_session_state(&calibration_session) == CAL_SESSION_SAMPLE)
         {
             buzzer_play(BUZZER_TONE_STEP_DONE);

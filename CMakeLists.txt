@@ -71,8 +71,6 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/led/board_led.h
         user/test/motor_test_task.c
         user/test/motor_test_task.h
-        user/test/stack_test.c
-        user/test/stack_test.h
         user/control/can/user_can.c
         user/control/can/user_can.h
         user/task/chassis_task/chassis_task.c

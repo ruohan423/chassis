@@ -55,7 +55,8 @@ typedef struct
     float increment;
 } pid_increment_t;
 
-/* sample_period_s 单位为秒；ki 作用于误差积分，kd 作用于每秒误差变化率。 */
+/* 各 pid 指针均指向调用方持有的可写控制器状态，必须在对应控制周期调用期间持续有效；模块不会保存额外指针。
+ * sample_period_s 单位为秒；ki 作用于误差积分，kd 作用于每秒误差变化率。 */
 void pid_position_init(pid_position_t *pid, float kp, float ki, float kd, float integral_limit,
                        float sample_period_s);
 float pid_position_calculate(pid_position_t *pid, float feedback, float reference);

@@ -37,9 +37,6 @@ void Judge_Task(void *argument)
 
     judge_clear();
     bool uart_started = uart_rx_start(&judge_uart_rx);
-#if STACK_TEST_ENABLED
-    StackTest_Record(STACK_TEST_JUDGE);
-#endif
 
     for (;;)
     {
@@ -82,9 +79,6 @@ void Judge_Task(void *argument)
         }
 
         process_transmit(osKernelGetTickCount());
-#if STACK_TEST_ENABLED
-        StackTest_Record(STACK_TEST_JUDGE);
-#endif
     }
 }
 

@@ -7,7 +7,7 @@
 #include "cmsis_os2.h"
 #include "can_commun.h"
 
-#define CANCOM_IMU_PERIOD_MS    10U  /* 底盘 IMU CAN 帧发送周期，单位 ms。 */
+#define CANCOM_SEND_PERIOD_MS   10U  /* 底盘姿态帧与云台指令帧的发送周期，单位 ms。 */
 #define CANCOM_RETRY_PERIOD_MS 100U  /* CAN 启动失败后的重试间隔，单位 ms。 */
 
 static osThreadId_t cancom_task_id;
@@ -19,12 +19,12 @@ void CanCom_Task(void *argument)
     cancom_task_id = osThreadGetId();
     bool can_started = can_commun_init();
     uint32_t now_tick = osKernelGetTickCount();
-    uint32_t next_imu_tick = now_tick + CANCOM_IMU_PERIOD_MS;
+    uint32_t next_send_tick = now_tick + CANCOM_SEND_PERIOD_MS;
     uint32_t next_retry_tick = now_tick + CANCOM_RETRY_PERIOD_MS;
 
     for (;;)
     {
-        const uint32_t next_deadline = can_started ? next_imu_tick : next_retry_tick;
+        const uint32_t next_deadline = can_started ? next_send_tick : next_retry_tick;
         const int32_t remaining_ticks = (int32_t)(next_deadline - now_tick);
         const uint32_t wait_ticks = remaining_ticks > 0 ? (uint32_t)remaining_ticks : 0U;
         const uint32_t flags = osThreadFlagsWait(CANCOM_TASK_REMOTE_FRAME_FLAG, osFlagsWaitAny, wait_ticks);
@@ -44,13 +44,14 @@ void CanCom_Task(void *argument)
             continue;
         }
 
-        if ((int32_t)(now_tick - next_imu_tick) >= 0)
+        if ((int32_t)(now_tick - next_send_tick) >= 0)
         {
             can_commun_send_imu();
+            can_commun_send_gimbal_active();
             do
             {
-                next_imu_tick += CANCOM_IMU_PERIOD_MS;
-            } while ((int32_t)(now_tick - next_imu_tick) >= 0);
+                next_send_tick += CANCOM_SEND_PERIOD_MS;
+            } while ((int32_t)(now_tick - next_send_tick) >= 0);
         }
         if ((flags & CANCOM_TASK_REMOTE_FRAME_FLAG) != 0U)
         {

@@ -14,6 +14,7 @@ typedef struct
 
 /* 从首次调用起由 0 匀速上升到 1，时间源由调用方传入；时长为 0 时立即完成。
  * 初始化时设置 duration_ticks，其余字段置零；计时单位须与 now_tick 一致。 */
+/* ramp 为调用方持有的可写状态，在连续调用期间保持有效；模块不会保存额外指针。 */
 float ramp_slope(ramp_t *ramp, uint32_t now_tick);
 void ramp_reset(ramp_t *ramp);
 

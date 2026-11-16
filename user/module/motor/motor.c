@@ -133,7 +133,7 @@ void DM4310_Receive(DM4310_TypeDef *Dst, const uint8_t *Data)
 }
 
 #ifdef HAL_CAN_MODULE_ENABLED
-HAL_StatusTypeDef MotorSend(CAN_HandleTypeDef *hcan, uint32_t StdId, int16_t *Data)
+HAL_StatusTypeDef MotorSend(CAN_HandleTypeDef *hcan, uint32_t StdId, const int16_t *Data)
 {
     uint8_t tx_data[8];
     uint32_t tx_mailbox;

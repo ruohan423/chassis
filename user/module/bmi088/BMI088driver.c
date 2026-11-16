@@ -200,7 +200,7 @@ uint8_t BMI088_accel_data_ready(void)
 
 
 
-void BMI088_read(float gyro[3], float accel[3], float *temperate)
+void BMI088_read(float *gyro, float *accel, float *temperate)
 {
     uint8_t buf[8] = {0};
     int16_t raw;

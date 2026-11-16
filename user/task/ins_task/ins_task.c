@@ -23,16 +23,17 @@
 #include "vqf.h"
 
 #define RAD_TO_DEG 57.295779513f
-float gyro[3], accel[3];
-float quat6d[4];
+static float imu_gyro[3];
+static float imu_accel[3];
+static float attitude_quaternion[4];
 volatile ins_output_t ins_output;
 
 static vqf_real_t gyro_bias[CAL_AXES];
 static vqf_real_t gyro_bias_sigma;
-float temperature_c;
+static float imu_temperature_c;
 
 
-static void quat_to_euler_deg(const float q[4], float euler[3]);
+static void quat_to_euler_deg(const float *q, float *euler);
 static bool startup_ready(void);
 
 
@@ -56,45 +57,45 @@ void INS_Task(void *argument)
 
     for (;;)
     {
-        Calib_ReadImu(gyro, accel, &temperature_c);
+        Calib_ReadImu(imu_gyro, imu_accel, &imu_temperature_c);
         swdg_feed_imu();
 
         const uint32_t now_tick = osKernelGetTickCount();
         const uint32_t heater_elapsed_ticks = now_tick - last_heater_tick;
         if ((float)heater_elapsed_ticks * 0.001f >= HEATER_CONTROL_PERIOD_S)
         {
-            (void)heater_update(temperature_c, (float)heater_elapsed_ticks * 0.001f);
+            (void)heater_update(imu_temperature_c, (float)heater_elapsed_ticks * 0.001f);
             last_heater_tick = now_tick;
         }
 
-        updateGyr(gyro);
+        updateGyr(imu_gyro);
 
         if (Calib_IsAccelReady())
         {
-            updateAcc(accel);
+            updateAcc(imu_accel);
         }
 
-        getQuat6D(quat6d);
+        getQuat6D(attitude_quaternion);
 
-        float euler_deg[3];
-        float gyro_bias_now[CAL_AXES];
+        static float euler_degrees[3];
+        static float current_gyro_bias[CAL_AXES];
 
         /* IMU 坐标系即机体坐标系：角速度扣除 VQF 当前零偏估计，加速度为机体系比力（含重力）。 */
-        quat_to_euler_deg(quat6d, euler_deg);
-        (void)getBiasEstimate(gyro_bias_now);
-        const float gyro_z = gyro[2] - gyro_bias_now[2];
-        const float yaw_rad = euler_deg[2] * 0.01745329252f;
+        quat_to_euler_deg(attitude_quaternion, euler_degrees);
+        (void)getBiasEstimate(current_gyro_bias);
+        const float gyro_z = imu_gyro[2] - current_gyro_bias[2];
+        const float yaw_rad = euler_degrees[2] * 0.01745329252f;
 
         const int32_t previous_lock = osKernelLock();
-        ins_output.roll_deg = euler_deg[0];
-        ins_output.pitch_deg = euler_deg[1];
-        ins_output.yaw_deg = euler_deg[2];
-        ins_output.gyro_x = gyro[0] - gyro_bias_now[0];
-        ins_output.gyro_y = gyro[1] - gyro_bias_now[1];
+        ins_output.roll_deg = euler_degrees[0];
+        ins_output.pitch_deg = euler_degrees[1];
+        ins_output.yaw_deg = euler_degrees[2];
+        ins_output.gyro_x = imu_gyro[0] - current_gyro_bias[0];
+        ins_output.gyro_y = imu_gyro[1] - current_gyro_bias[1];
         ins_output.gyro_z = gyro_z;
-        ins_output.accel_x = accel[0];
-        ins_output.accel_y = accel[1];
-        ins_output.accel_z = accel[2];
+        ins_output.accel_x = imu_accel[0];
+        ins_output.accel_y = imu_accel[1];
+        ins_output.accel_z = imu_accel[2];
         if (previous_lock == 0)
         {
             (void)osKernelRestoreLock(previous_lock);
@@ -134,7 +135,7 @@ static bool startup_ready(void)
 #endif
 }
 
-static void quat_to_euler_deg(const float q[4], float euler[3])
+static void quat_to_euler_deg(const float *q, float *euler)
 {
     float sin_pitch;
 

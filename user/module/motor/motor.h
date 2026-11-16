@@ -114,6 +114,7 @@ typedef enum
     C620_err_overhot=8,//过温错误
    }C620_err_t;
 
+/* 各接收函数写入 Dst，并只读借用调用期间有效的 8 字节 CAN 载荷；函数不会保存载荷指针。 */
 void RM6623_Receive(RM6623_TypeDef *Dst, const uint8_t *Data);
 void RM3510_Receive(RM3510_TypeDef *Dst, const uint8_t *Data);
 void RM3508_Receive(RM3508_TypeDef *Dst, const uint8_t *Data);
@@ -124,7 +125,8 @@ void DM4310_Receive(DM4310_TypeDef *Dst, const uint8_t *Data);
 int16_t QuickCentering(uint16_t Mch, uint16_t Exp);
 
 #ifdef HAL_CAN_MODULE_ENABLED
-HAL_StatusTypeDef MotorSend(CAN_HandleTypeDef *hcan, uint32_t StdId, int16_t *Data);
+/* Data 为调用方持有的四路只读电流指令，仅在本次调用期间借用；函数返回前已完成 CAN 邮箱提交。 */
+HAL_StatusTypeDef MotorSend(CAN_HandleTypeDef *hcan, uint32_t StdId, const int16_t *Data);
 #endif
 
 #ifdef __cplusplus

@@ -170,7 +170,7 @@ static float vqf_min(float a, float b) {
     return a < b ? a : b;
 }
 
-static vqf_real_t norm(const vqf_real_t vec[], size_t N)
+static vqf_real_t norm(const vqf_real_t *vec, size_t N)
 {
     vqf_real_t s = 0;
     for(size_t i = 0; i < N; i++) {
@@ -180,7 +180,7 @@ static vqf_real_t norm(const vqf_real_t vec[], size_t N)
     return sqrt(s);
 }
 
-static void normalize(vqf_real_t vec[], size_t N)
+static void normalize(vqf_real_t *vec, size_t N)
 {
     vqf_real_t n = norm(vec, N);
     if (n < EPS) {
@@ -191,7 +191,7 @@ static void normalize(vqf_real_t vec[], size_t N)
     }
 }
 
-static void clip(vqf_real_t vec[], size_t N, vqf_real_t min, vqf_real_t max)
+static void clip(vqf_real_t *vec, size_t N, vqf_real_t min, vqf_real_t max)
 {
     for(size_t i = 0; i < N; i++) {
         if (vec[i] < min) {
@@ -204,7 +204,7 @@ static void clip(vqf_real_t vec[], size_t N, vqf_real_t min, vqf_real_t max)
 
 
 // this func can be replaced by arm_quaternion_product_f32 from CMSIS-DSP
-static void quatMultiply(const vqf_real_t q1[4], const vqf_real_t q2[4], vqf_real_t out[4])
+static void quatMultiply(const vqf_real_t *q1, const vqf_real_t *q2, vqf_real_t *out)
 {
     vqf_real_t w = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3];
     vqf_real_t x = q1[0] * q2[1] + q1[1] * q2[0] + q1[2] * q2[3] - q1[3] * q2[2];
@@ -214,16 +214,7 @@ static void quatMultiply(const vqf_real_t q1[4], const vqf_real_t q2[4], vqf_rea
 }
 
 // thio func can be replaced by arm_quaternion_conjugate_f32 from CMSIS-DSP
-static void quatConj(const vqf_real_t q[4], vqf_real_t out[4])
-{
-    vqf_real_t w = q[0];
-    vqf_real_t x = -q[1];
-    vqf_real_t y = -q[2];
-    vqf_real_t z = -q[3];
-    out[0] = w; out[1] = x; out[2] = y; out[3] = z;
-}
-
-static void quatSetToIdentity(vqf_real_t out[4])
+static void quatSetToIdentity(vqf_real_t *out)
 {
     out[0] = 1;
     out[1] = 0;
@@ -231,7 +222,7 @@ static void quatSetToIdentity(vqf_real_t out[4])
     out[3] = 0;
 }
 
-static void quatApplyDelta(vqf_real_t q[], vqf_real_t delta, vqf_real_t out[])
+static void quatApplyDelta(const vqf_real_t *q, vqf_real_t delta, vqf_real_t *out)
 {
     // out = quatMultiply([cos(delta/2), 0, 0, sin(delta/2)], q)
     // sin and cos can be replaced by arm_sin_f32 and arm_cos_f32 from CMSIS-DSP
@@ -244,7 +235,7 @@ static void quatApplyDelta(vqf_real_t q[], vqf_real_t delta, vqf_real_t out[])
     out[0] = w; out[1] = x; out[2] = y; out[3] = z;
 }
 
-static void quatRotate(const vqf_real_t q[4], const vqf_real_t v[3], vqf_real_t out[3])
+static void quatRotate(const vqf_real_t *q, const vqf_real_t *v, vqf_real_t *out)
 {
     vqf_real_t x = (1 - 2*q[2]*q[2] - 2*q[3]*q[3])*v[0] + 2*v[1]*(q[2]*q[1] - q[0]*q[3]) + 2*v[2]*(q[0]*q[2] + q[3]*q[1]);
     vqf_real_t y = 2*v[0]*(q[0]*q[3] + q[2]*q[1]) + v[1]*(1 - 2*q[1]*q[1] - 2*q[3]*q[3]) + 2*v[2]*(q[2]*q[3] - q[1]*q[0]);
@@ -267,7 +258,7 @@ static vqf_real_t gainFromTau(vqf_real_t tau, vqf_real_t Ts)
     }
 }
 
-static void filterCoeffs(vqf_real_t tau, vqf_real_t Ts, vqf_double_t outB[], vqf_double_t outA[])
+static void filterCoeffs(vqf_real_t tau, vqf_real_t Ts, vqf_double_t *outB, vqf_double_t *outA)
 {
     // assert(tau > 0);
     // assert(Ts > 0);
@@ -287,7 +278,7 @@ static void filterCoeffs(vqf_real_t tau, vqf_real_t Ts, vqf_double_t outB[], vqf
     outA[1] = (1-sqrt(2)*C+C*C)/D; // a2
 }
 
-static void filterInitialState(vqf_real_t x0, const vqf_double_t b[3], const vqf_double_t a[2], vqf_double_t out[])
+static void filterInitialState(vqf_real_t x0, const vqf_double_t *b, const vqf_double_t *a, vqf_double_t *out)
 {
     // initial state for steady state (equivalent to scipy.signal.lfilter_zi, obtained by setting y=x=x0 in the filter
     // update equation)
@@ -295,9 +286,9 @@ static void filterInitialState(vqf_real_t x0, const vqf_double_t b[3], const vqf
     out[1] = x0*(b[2] - a[1]);
 }
 
-static void filterAdaptStateForCoeffChange(vqf_real_t last_y[], size_t N, const vqf_double_t b_old[],
-                                         const vqf_double_t a_old[], const vqf_double_t b_new[],
-                                         const vqf_double_t a_new[], vqf_double_t state[])
+static void filterAdaptStateForCoeffChange(const vqf_real_t *last_y, size_t N, const vqf_double_t *b_old,
+                                         const vqf_double_t *a_old, const vqf_double_t *b_new,
+                                         const vqf_double_t *a_new, vqf_double_t *state)
 {
     if (isnan(state[0])) {
         return;
@@ -308,7 +299,7 @@ static void filterAdaptStateForCoeffChange(vqf_real_t last_y[], size_t N, const 
     }
 }
 
-static vqf_real_t filterStep(vqf_real_t x, const vqf_double_t b[3], const vqf_double_t a[2], vqf_double_t state[2])
+static vqf_real_t filterStep(vqf_real_t x, const vqf_double_t *b, const vqf_double_t *a, vqf_double_t *state)
 {
     // difference equations based on scipy.signal.lfilter documentation
     // assumes that a0 == 1.0
@@ -318,8 +309,8 @@ static vqf_real_t filterStep(vqf_real_t x, const vqf_double_t b[3], const vqf_do
     return y;
 }
 
-static void filterVec(const vqf_real_t x[], size_t N, vqf_real_t tau, vqf_real_t Ts, const vqf_double_t b[3],
-                    const vqf_double_t a[2], vqf_double_t state[], vqf_real_t out[])
+static void filterVec(const vqf_real_t *x, size_t N, vqf_real_t tau, vqf_real_t Ts, const vqf_double_t *b,
+                    const vqf_double_t *a, vqf_double_t *state, vqf_real_t *out)
 {
     // assert(N>=2);
 
@@ -350,7 +341,7 @@ static void filterVec(const vqf_real_t x[], size_t N, vqf_real_t tau, vqf_real_t
     }
 }
 
-static void matrix3SetToScaledIdentity(vqf_real_t scale, vqf_real_t out[9])
+static void matrix3SetToScaledIdentity(vqf_real_t scale, vqf_real_t *out)
 {
     out[0] = scale;
     out[1] = 0.0;
@@ -363,7 +354,7 @@ static void matrix3SetToScaledIdentity(vqf_real_t scale, vqf_real_t out[9])
     out[8] = scale;
 }
 
-static void matrix3Multiply(const vqf_real_t in1[9], const vqf_real_t in2[9], vqf_real_t out[9])
+static void matrix3Multiply(const vqf_real_t *in1, const vqf_real_t *in2, vqf_real_t *out)
 {
     vqf_real_t tmp[9];
     tmp[0] = in1[0]*in2[0] + in1[1]*in2[3] + in1[2]*in2[6];
@@ -379,7 +370,7 @@ static void matrix3Multiply(const vqf_real_t in1[9], const vqf_real_t in2[9], vq
     // std::copy(tmp, tmp+9, out);
 }
 
-static void matrix3MultiplyTpsFirst(const vqf_real_t in1[9], const vqf_real_t in2[9], vqf_real_t out[9])
+static void matrix3MultiplyTpsFirst(const vqf_real_t *in1, const vqf_real_t *in2, vqf_real_t *out)
 {
     vqf_real_t tmp[9];
     tmp[0] = in1[0]*in2[0] + in1[3]*in2[3] + in1[6]*in2[6];
@@ -395,7 +386,7 @@ static void matrix3MultiplyTpsFirst(const vqf_real_t in1[9], const vqf_real_t in
     // std::copy(tmp, tmp+9, out);
 }
 
-static void matrix3MultiplyTpsSecond(const vqf_real_t in1[9], const vqf_real_t in2[9], vqf_real_t out[9])
+static void matrix3MultiplyTpsSecond(const vqf_real_t *in1, const vqf_real_t *in2, vqf_real_t *out)
 {
     vqf_real_t tmp[9];
     tmp[0] = in1[0]*in2[0] + in1[1]*in2[1] + in1[2]*in2[2];
@@ -411,7 +402,7 @@ static void matrix3MultiplyTpsSecond(const vqf_real_t in1[9], const vqf_real_t i
     // std::copy(tmp, tmp+9, out);
 }
 
-static bool matrix3Inv(const vqf_real_t in[9], vqf_real_t out[9])
+static bool matrix3Inv(const vqf_real_t *in, vqf_real_t *out)
 {
     // in = [a b c; d e f; g h i]
     vqf_double_t A = in[4]*in[8] - in[5]*in[7]; // (e*i - f*h)
@@ -452,7 +443,7 @@ static bool matrix3Inv(const vqf_real_t in[9], vqf_real_t out[9])
 
 
 
-void updateGyr(const vqf_real_t gyr[3])
+void updateGyr(const vqf_real_t *gyr)
 {
     // rest detection
     if (params.restBiasEstEnabled || params.magDistRejectionEnabled) {
@@ -488,8 +479,17 @@ void updateGyr(const vqf_real_t gyr[3])
     }
 }
 
-void updateAcc(const vqf_real_t acc[3])
+void updateAcc(const vqf_real_t *acc)
 {
+    /* VQF 当前是单例且只由 INS_Task 调用；复用工作区避免滤波和偏置估计数组占用任务栈。 */
+    static vqf_real_t acc_earth[3];
+    static vqf_real_t acc_correction_quat[4];
+    static vqf_real_t rotation_matrix[9];
+    static vqf_real_t bias_lp[2];
+    static vqf_real_t measurement_weight[3];
+    static vqf_real_t measurement_error[3];
+    static vqf_real_t kalman_gain[9];
+
     // ignore [0 0 0] samples
     if (acc[0] == (vqf_real_t)(0.0) && acc[1] == (vqf_real_t)(0.0) && acc[2] == (vqf_real_t)(0.0)) {
         return;
@@ -514,34 +514,31 @@ void updateAcc(const vqf_real_t acc[3])
         }
     }
 
-    vqf_real_t accEarth[3];
-
     // filter acc in inertial frame
-    quatRotate(state.gyrQuat, acc, accEarth);
-    filterVec(accEarth, 3, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.accLpState, state.lastAccLp);
+    quatRotate(state.gyrQuat, acc, acc_earth);
+    filterVec(acc_earth, 3, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.accLpState, state.lastAccLp);
 
     // transform to 6D earth frame and normalize
-    quatRotate(state.accQuat, state.lastAccLp, accEarth);
-    normalize(accEarth, 3);
+    quatRotate(state.accQuat, state.lastAccLp, acc_earth);
+    normalize(acc_earth, 3);
 
     // inclination correction
-    vqf_real_t accCorrQuat[4];
     // sqrt can be replaced by arm_sqrt_f32 from CMSIS_DSP
-    vqf_real_t accEarthZ = vqf_max(vqf_min(accEarth[2], (vqf_real_t)1.0), (vqf_real_t)-1.0);
+    vqf_real_t accEarthZ = vqf_max(vqf_min(acc_earth[2], (vqf_real_t)1.0), (vqf_real_t)-1.0);
     vqf_real_t q_w = sqrt((accEarthZ+1)/2);
     if (q_w > 1e-6) {
-        accCorrQuat[0] = q_w;
-        accCorrQuat[1] = 0.5*accEarth[1]/q_w;
-        accCorrQuat[2] = -0.5*accEarth[0]/q_w;
-        accCorrQuat[3] = 0;
+        acc_correction_quat[0] = q_w;
+        acc_correction_quat[1] = 0.5*acc_earth[1]/q_w;
+        acc_correction_quat[2] = -0.5*acc_earth[0]/q_w;
+        acc_correction_quat[3] = 0;
     } else {
         // to avoid numeric issues when acc is close to [0 0 -1], i.e. the correction step is close (<= 0.00011°) to 180°:
-        accCorrQuat[0] = 0;
-        accCorrQuat[1] = 1;
-        accCorrQuat[2] = 0;
-        accCorrQuat[3] = 0;
+        acc_correction_quat[0] = 0;
+        acc_correction_quat[1] = 1;
+        acc_correction_quat[2] = 0;
+        acc_correction_quat[3] = 0;
     }
-    quatMultiply(accCorrQuat, state.accQuat, state.accQuat);
+    quatMultiply(acc_correction_quat, state.accQuat, state.accQuat);
     normalize(state.accQuat, 4);
 
     // calculate correction angular rate to facilitate debugging
@@ -552,50 +549,44 @@ void updateAcc(const vqf_real_t acc[3])
     if (params.motionBiasEstEnabled || params.restBiasEstEnabled) {
         vqf_real_t biasClip = params.biasClip*(vqf_real_t)(M_PIf/180.0);
 
-        vqf_real_t accGyrQuat[4];
-        vqf_real_t R[9];
-        vqf_real_t biasLp[2];
-
         // get rotation matrix corresponding to accGyrQuat
-        getQuat6D(accGyrQuat);
-        R[0] = 1 - 2*vqf_square(accGyrQuat[2]) - 2*vqf_square(accGyrQuat[3]); // r11
-        R[1] = 2*(accGyrQuat[2]*accGyrQuat[1] - accGyrQuat[0]*accGyrQuat[3]); // r12
-        R[2] = 2*(accGyrQuat[0]*accGyrQuat[2] + accGyrQuat[3]*accGyrQuat[1]); // r13
-        R[3] = 2*(accGyrQuat[0]*accGyrQuat[3] + accGyrQuat[2]*accGyrQuat[1]); // r21
-        R[4] = 1 - 2*vqf_square(accGyrQuat[1]) - 2*vqf_square(accGyrQuat[3]); // r22
-        R[5] = 2*(accGyrQuat[2]*accGyrQuat[3] - accGyrQuat[1]*accGyrQuat[0]); // r23
-        R[6] = 2*(accGyrQuat[3]*accGyrQuat[1] - accGyrQuat[0]*accGyrQuat[2]); // r31
-        R[7] = 2*(accGyrQuat[0]*accGyrQuat[1] + accGyrQuat[3]*accGyrQuat[2]); // r32
-        R[8] = 1 - 2*vqf_square(accGyrQuat[1]) - 2*vqf_square(accGyrQuat[2]); // r33
+        getQuat6D(acc_correction_quat);
+        rotation_matrix[0] = 1 - 2*vqf_square(acc_correction_quat[2]) - 2*vqf_square(acc_correction_quat[3]); // r11
+        rotation_matrix[1] = 2*(acc_correction_quat[2]*acc_correction_quat[1] - acc_correction_quat[0]*acc_correction_quat[3]); // r12
+        rotation_matrix[2] = 2*(acc_correction_quat[0]*acc_correction_quat[2] + acc_correction_quat[3]*acc_correction_quat[1]); // r13
+        rotation_matrix[3] = 2*(acc_correction_quat[0]*acc_correction_quat[3] + acc_correction_quat[2]*acc_correction_quat[1]); // r21
+        rotation_matrix[4] = 1 - 2*vqf_square(acc_correction_quat[1]) - 2*vqf_square(acc_correction_quat[3]); // r22
+        rotation_matrix[5] = 2*(acc_correction_quat[2]*acc_correction_quat[3] - acc_correction_quat[1]*acc_correction_quat[0]); // r23
+        rotation_matrix[6] = 2*(acc_correction_quat[3]*acc_correction_quat[1] - acc_correction_quat[0]*acc_correction_quat[2]); // r31
+        rotation_matrix[7] = 2*(acc_correction_quat[0]*acc_correction_quat[1] + acc_correction_quat[3]*acc_correction_quat[2]); // r32
+        rotation_matrix[8] = 1 - 2*vqf_square(acc_correction_quat[1]) - 2*vqf_square(acc_correction_quat[2]); // r33
 
         // calculate R*b_hat (only the x and y component, as z is not needed)
-        biasLp[0] = R[0]*state.bias[0] + R[1]*state.bias[1] + R[2]*state.bias[2];
-        biasLp[1] = R[3]*state.bias[0] + R[4]*state.bias[1] + R[5]*state.bias[2];
+        bias_lp[0] = rotation_matrix[0]*state.bias[0] + rotation_matrix[1]*state.bias[1] + rotation_matrix[2]*state.bias[2];
+        bias_lp[1] = rotation_matrix[3]*state.bias[0] + rotation_matrix[4]*state.bias[1] + rotation_matrix[5]*state.bias[2];
 
         // low-pass filter R and R*b_hat
-        filterVec(R, 9, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.motionBiasEstRLpState, R);
-        filterVec(biasLp, 2, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.motionBiasEstBiasLpState,
-                  biasLp);
+        filterVec(rotation_matrix, 9, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.motionBiasEstRLpState, rotation_matrix);
+        filterVec(bias_lp, 2, params.tauAcc, coeffs.accTs, coeffs.accLpB, coeffs.accLpA, state.motionBiasEstBiasLpState,
+                  bias_lp);
 
         // set measurement error and covariance for the respective Kalman filter update
-        vqf_real_t w[3];
-        vqf_real_t e[3];
         if (state.restDetected && params.restBiasEstEnabled) {
-            e[0] = state.restLastGyrLp[0] - state.bias[0];
-            e[1] = state.restLastGyrLp[1] - state.bias[1];
-            e[2] = state.restLastGyrLp[2] - state.bias[2];
-            matrix3SetToScaledIdentity(1.0, R);
-            vqf_fill_real(w, 3, coeffs.biasRestW);
+            measurement_error[0] = state.restLastGyrLp[0] - state.bias[0];
+            measurement_error[1] = state.restLastGyrLp[1] - state.bias[1];
+            measurement_error[2] = state.restLastGyrLp[2] - state.bias[2];
+            matrix3SetToScaledIdentity(1.0, rotation_matrix);
+            vqf_fill_real(measurement_weight, 3, coeffs.biasRestW);
             // std::fill(w, w+3, coeffs.biasRestW);
         } else if (params.motionBiasEstEnabled) {
-            e[0] = -accEarth[1]/coeffs.accTs + biasLp[0] - R[0]*state.bias[0] - R[1]*state.bias[1] - R[2]*state.bias[2];
-            e[1] = accEarth[0]/coeffs.accTs + biasLp[1] - R[3]*state.bias[0] - R[4]*state.bias[1] - R[5]*state.bias[2];
-            e[2] = - R[6]*state.bias[0] - R[7]*state.bias[1] - R[8]*state.bias[2];
-            w[0] = coeffs.biasMotionW;
-            w[1] = coeffs.biasMotionW;
-            w[2] = coeffs.biasVerticalW;
+            measurement_error[0] = -acc_earth[1]/coeffs.accTs + bias_lp[0] - rotation_matrix[0]*state.bias[0] - rotation_matrix[1]*state.bias[1] - rotation_matrix[2]*state.bias[2];
+            measurement_error[1] = acc_earth[0]/coeffs.accTs + bias_lp[1] - rotation_matrix[3]*state.bias[0] - rotation_matrix[4]*state.bias[1] - rotation_matrix[5]*state.bias[2];
+            measurement_error[2] = - rotation_matrix[6]*state.bias[0] - rotation_matrix[7]*state.bias[1] - rotation_matrix[8]*state.bias[2];
+            measurement_weight[0] = coeffs.biasMotionW;
+            measurement_weight[1] = coeffs.biasMotionW;
+            measurement_weight[2] = coeffs.biasVerticalW;
         } else {
-            vqf_fill_real(w, 3, -1);
+            vqf_fill_real(measurement_weight, 3, -1);
             // std::fill(w, w+3, -1); // disable update
         }
 
@@ -610,32 +601,31 @@ void updateAcc(const vqf_real_t acc[3])
         if (state.biasP[8] < coeffs.biasP0) {
             state.biasP[8] += coeffs.biasV;
         }
-        if (w[0] >= 0) {
+        if (measurement_weight[0] >= 0) {
             // clip disagreement to -2..2 °/s
             // (this also effectively limits the harm done by the first inclination correction step)
-            clip(e, 3, -biasClip, biasClip);
+            clip(measurement_error, 3, -biasClip, biasClip);
 
             // step 2: K = P R^T inv(W + R P R^T)
-            vqf_real_t K[9];
-            matrix3MultiplyTpsSecond(state.biasP, R, K); // K = P R^T
-            matrix3Multiply(R, K, K); // K = R P R^T
-            K[0] += w[0];
-            K[4] += w[1];
-            K[8] += w[2]; // K = W + R P R^T
-            matrix3Inv(K, K); // K = inv(W + R P R^T)
-            matrix3MultiplyTpsFirst(R, K, K); // K = R^T inv(W + R P R^T)
-            matrix3Multiply(state.biasP, K, K); // K = P R^T inv(W + R P R^T)
+            matrix3MultiplyTpsSecond(state.biasP, rotation_matrix, kalman_gain); // K = P R^T
+            matrix3Multiply(rotation_matrix, kalman_gain, kalman_gain); // K = R P R^T
+            kalman_gain[0] += measurement_weight[0];
+            kalman_gain[4] += measurement_weight[1];
+            kalman_gain[8] += measurement_weight[2]; // K = W + R P R^T
+            matrix3Inv(kalman_gain, kalman_gain); // K = inv(W + R P R^T)
+            matrix3MultiplyTpsFirst(rotation_matrix, kalman_gain, kalman_gain); // K = R^T inv(W + R P R^T)
+            matrix3Multiply(state.biasP, kalman_gain, kalman_gain); // K = P R^T inv(W + R P R^T)
 
             // step 3: bias = bias + K (y - R bias) = bias + K e
-            state.bias[0] += K[0]*e[0] + K[1]*e[1] + K[2]*e[2];
-            state.bias[1] += K[3]*e[0] + K[4]*e[1] + K[5]*e[2];
-            state.bias[2] += K[6]*e[0] + K[7]*e[1] + K[8]*e[2];
+            state.bias[0] += kalman_gain[0]*measurement_error[0] + kalman_gain[1]*measurement_error[1] + kalman_gain[2]*measurement_error[2];
+            state.bias[1] += kalman_gain[3]*measurement_error[0] + kalman_gain[4]*measurement_error[1] + kalman_gain[5]*measurement_error[2];
+            state.bias[2] += kalman_gain[6]*measurement_error[0] + kalman_gain[7]*measurement_error[1] + kalman_gain[8]*measurement_error[2];
 
             // step 4: P = P - K R P
-            matrix3Multiply(K, R, K); // K = K R
-            matrix3Multiply(K, state.biasP, K); // K = K R P
+            matrix3Multiply(kalman_gain, rotation_matrix, kalman_gain); // K = K R
+            matrix3Multiply(kalman_gain, state.biasP, kalman_gain); // K = K R P
             for(size_t i = 0; i < 9; i++) {
-                state.biasP[i] -= K[i];
+                state.biasP[i] -= kalman_gain[i];
             }
 
             // clip bias estimate to -2..2 °/s
@@ -644,7 +634,7 @@ void updateAcc(const vqf_real_t acc[3])
     }
 }
 
-void updateMag(const vqf_real_t mag[3])
+void updateMag(const vqf_real_t *mag)
 {
     // ignore [0 0 0] samples
     if (mag[0] == (vqf_real_t)(0.0) && mag[1] == (vqf_real_t)(0.0) && mag[2] == (vqf_real_t)(0.0)) {
@@ -812,18 +802,18 @@ void updateMag(const vqf_real_t mag[3])
 //     }
 // }
 
-void getQuat3D(vqf_real_t out[4])
+void getQuat3D(vqf_real_t *out)
 {
     memcpy(out, state.gyrQuat, sizeof(state.gyrQuat));
     // std::copy(state.gyrQuat, state.gyrQuat+4, out);
 }
 
-void getQuat6D(vqf_real_t out[4])
+void getQuat6D(vqf_real_t *out)
 {
     quatMultiply(state.accQuat, state.gyrQuat, out);
 }
 
-void getQuat9D(vqf_real_t out[4])
+void getQuat9D(vqf_real_t *out)
 {
     quatMultiply(state.accQuat, state.gyrQuat, out);
     quatApplyDelta(out, state.delta, out);
@@ -834,7 +824,7 @@ vqf_real_t getDelta()
     return state.delta;
 }
 
-vqf_real_t getBiasEstimate(vqf_real_t out[3])
+vqf_real_t getBiasEstimate(vqf_real_t *out)
 {
     if (out) {
         memcpy(out, state.bias, sizeof(state.bias));
@@ -852,7 +842,7 @@ vqf_real_t getBiasEstimate(vqf_real_t out[3])
     return sqrt(P)*(vqf_real_t)(M_PIf/100.0/180.0);
 }
 
-void setBiasEstimate(vqf_real_t bias[3], vqf_real_t sigma)
+void setBiasEstimate(const vqf_real_t *bias, vqf_real_t sigma)
 {
     memcpy(state.bias, bias, sizeof(state.bias));
     // std::copy(bias, bias+3, state.bias);
@@ -872,7 +862,7 @@ bool getMagDistDetected()
     return state.magDistDetected;
 }
 
-void getRelativeRestDeviations(vqf_real_t out[2])
+void getRelativeRestDeviations(vqf_real_t *out)
 {
     // sqrt can be replaced by arm_sqrt_f32 from CMSIS_DSP
     out[0] = sqrt(state.restLastSquaredDeviations[0]) / (params.restThGyr*(vqf_real_t)(M_PIf/180.0));

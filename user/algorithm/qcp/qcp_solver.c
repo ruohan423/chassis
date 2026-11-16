@@ -4,139 +4,124 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* 菱形被 y_max 截断后最多 5 个顶点，再被 x_max 裁剪最多增加 1 个。 */
-#define QCP_MAX_VERTICES 8U
 #define QCP_EPSILON      1e-9f
 
-typedef struct
-{
-    qcp_point_t vertices[QCP_MAX_VERTICES];
-    uint32_t count;
-} qcp_polygon_t;
-
-/* 二次约束的矩阵形式：0.5 xᵀQx + pᵀx + r <= 0，Q 对称。 */
-typedef struct
-{
-    float q00;
-    float q01;
-    float q11;
-    float p0;
-    float p1;
-    float r;
-} qcp_quadratic_t;
-
-static void build_polygon(qcp_polygon_t *polygon, float rhombus_right, float rhombus_top, float x_max, float y_max);
+static void build_polygon(qcp_workspace_t *workspace, float rhombus_right, float rhombus_top, float x_max, float y_max);
 static bool point_inside_polygon(qcp_point_t p, const qcp_polygon_t *polygon);
 static qcp_point_t best_point_at_intersections(qcp_point_t objective, const qcp_polygon_t *polygon,
                                                const qcp_quadratic_t *quadratic);
 
 qcp_point_t qcp_solve(qcp_point_t objective, float x_max, float y_max, float rhombus_right, float rhombus_top,
-                      const float quadratic[6])
+                      const float *quadratic, qcp_workspace_t *workspace)
 {
-    qcp_polygon_t polygon;
-    build_polygon(&polygon, rhombus_right, rhombus_top, x_max, y_max);
+    build_polygon(workspace, rhombus_right, rhombus_top, x_max, y_max);
 
-    qcp_quadratic_t q = {2.0f * quadratic[0], quadratic[1], 2.0f * quadratic[2], quadratic[3], quadratic[4], quadratic[5]};
-    if (q.q00 < 0.0f)
+    workspace->quadratic = (qcp_quadratic_t){2.0f * quadratic[0], quadratic[1], 2.0f * quadratic[2],
+                                             quadratic[3], quadratic[4], quadratic[5]};
+    qcp_quadratic_t *constraint = &workspace->quadratic;
+    if (constraint->q00 < 0.0f)
     {
-        q = (qcp_quadratic_t){-q.q00, -q.q01, -q.q11, -q.p0, -q.p1, -q.r};
+        *constraint = (qcp_quadratic_t){-constraint->q00, -constraint->q01, -constraint->q11,
+                                       -constraint->p0, -constraint->p1, -constraint->r};
     }
 
     /* 二次约束边界上的目标极值点；落在多边形内即为最优解。 */
-    float determinant = q.q00 * q.q11 - q.q01 * q.q01;
+    float determinant = constraint->q00 * constraint->q11 - constraint->q01 * constraint->q01;
     if (determinant < 0.0f)
     {
         return (qcp_point_t){0.0f, 0.0f};
     }
-    float q00 = q.q00;
-    float q11 = q.q11;
     if (determinant < QCP_EPSILON)
     {
-        q00 += QCP_EPSILON;
-        q11 += QCP_EPSILON;
-        determinant = q00 * q11 - q.q01 * q.q01;
+        constraint->q00 += QCP_EPSILON;
+        constraint->q11 += QCP_EPSILON;
+        determinant = constraint->q00 * constraint->q11 - constraint->q01 * constraint->q01;
     }
-    const float inverse00 = q11 / determinant;
-    const float inverse01 = -q.q01 / determinant;
-    const float inverse11 = q00 / determinant;
-    const float scale_squared = (q.p0 * (inverse00 * q.p0 + inverse01 * q.p1) + q.p1 * (inverse01 * q.p0 + inverse11 * q.p1) - 2.0f * q.r)
+    const float inverse00 = constraint->q11 / determinant;
+    const float inverse01 = -constraint->q01 / determinant;
+    const float inverse11 = constraint->q00 / determinant;
+    const float scale_squared = (constraint->p0 * (inverse00 * constraint->p0 + inverse01 * constraint->p1)
+                                 + constraint->p1 * (inverse01 * constraint->p0 + inverse11 * constraint->p1)
+                                 - 2.0f * constraint->r)
         / (objective.x * (inverse00 * objective.x + inverse01 * objective.y)
            + objective.y * (inverse01 * objective.x + inverse11 * objective.y));
     /* 负值表示二次约束无可行点，与参考实现中 NaN 落入交点搜索的结果一致。 */
     if (scale_squared >= 0.0f)
     {
         const float scale = sqrtf(scale_squared);
-        const float vx = scale * objective.x - q.p0;
-        const float vy = scale * objective.y - q.p1;
+        const float vx = scale * objective.x - constraint->p0;
+        const float vy = scale * objective.y - constraint->p1;
         const qcp_point_t best = {inverse00 * vx + inverse01 * vy, inverse01 * vx + inverse11 * vy};
-        if (point_inside_polygon(best, &polygon))
+        if (point_inside_polygon(best, &workspace->polygon))
         {
             return best;
         }
     }
 
-    return best_point_at_intersections(objective, &polygon, &q);
+    return best_point_at_intersections(objective, &workspace->polygon, constraint);
 }
 
 /* 生成逆时针、无重复顶点的线性可行域，要求两个菱形半轴为正。 */
-static void build_polygon(qcp_polygon_t *polygon, float rhombus_right, float rhombus_top, float x_max, float y_max)
+static void build_polygon(qcp_workspace_t *workspace, float rhombus_right, float rhombus_top, float x_max, float y_max)
 {
-    qcp_polygon_t rhombus = {.count = 0U};
+    qcp_polygon_t *polygon = &workspace->polygon;
+    qcp_point_t *rhombus_vertices = workspace->rhombus_vertices;
+    uint32_t rhombus_vertex_count = 0U;
 
     if (y_max >= rhombus_top)
     {
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){rhombus_right, 0.0f};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){0.0f, rhombus_top};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){-rhombus_right, 0.0f};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){0.0f, -rhombus_top};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){rhombus_right, 0.0f};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){0.0f, rhombus_top};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){-rhombus_right, 0.0f};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){0.0f, -rhombus_top};
     }
     else if (y_max > 0.0f)
     {
         const float intersecting_x = (rhombus_right / rhombus_top) * (rhombus_top - y_max);
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){rhombus_right, 0.0f};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){intersecting_x, y_max};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){-intersecting_x, y_max};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){-rhombus_right, 0.0f};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){0.0f, -rhombus_top};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){rhombus_right, 0.0f};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){intersecting_x, y_max};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){-intersecting_x, y_max};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){-rhombus_right, 0.0f};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){0.0f, -rhombus_top};
     }
     else if (y_max > -rhombus_top)
     {
         const float intersecting_x = -(rhombus_right / rhombus_top) * (-rhombus_top - y_max);
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){intersecting_x, y_max};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){-intersecting_x, y_max};
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){0.0f, -rhombus_top};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){intersecting_x, y_max};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){-intersecting_x, y_max};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){0.0f, -rhombus_top};
     }
     else if (y_max == -rhombus_top)
     {
-        rhombus.vertices[rhombus.count++] = (qcp_point_t){0.0f, -rhombus_top};
+        rhombus_vertices[rhombus_vertex_count++] = (qcp_point_t){0.0f, -rhombus_top};
     }
 
     /* Sutherland-Hodgman 裁剪：保留 x <= x_max 的部分。 */
     polygon->count = 0U;
-    for (uint32_t i = rhombus.count - 1U, j = 0U; j < rhombus.count; i = j++)
+    for (uint32_t i = rhombus_vertex_count - 1U, j = 0U; j < rhombus_vertex_count; i = j++)
     {
-        const qcp_point_t current = rhombus.vertices[j];
-        const qcp_point_t previous = rhombus.vertices[i];
-        const float current_side = current.x - x_max;
-        const float previous_side = previous.x - x_max;
-        const qcp_point_t crossing = {
-            x_max, current.y + (previous.y - current.y) * (x_max - current.x) / (previous.x - current.x)};
+        const qcp_point_t *current = &rhombus_vertices[j];
+        const qcp_point_t *previous = &rhombus_vertices[i];
+        const float current_side = current->x - x_max;
+        const float previous_side = previous->x - x_max;
 
         if (current_side == 0.0f)
         {
-            polygon->vertices[polygon->count++] = current;
+            polygon->vertices[polygon->count++] = *current;
         }
         else if (current_side < 0.0f)
         {
             if (previous_side > 0.0f)
             {
-                polygon->vertices[polygon->count++] = crossing;
+                polygon->vertices[polygon->count++] = (qcp_point_t){
+                    x_max, current->y + (previous->y - current->y) * (x_max - current->x) / (previous->x - current->x)};
             }
-            polygon->vertices[polygon->count++] = current;
+            polygon->vertices[polygon->count++] = *current;
         }
-        else if (previous_side < 0.0f && rhombus.count != 2U)
+        else if (previous_side < 0.0f && rhombus_vertex_count != 2U)
         {
-            polygon->vertices[polygon->count++] = crossing;
+            polygon->vertices[polygon->count++] = (qcp_point_t){
+                x_max, current->y + (previous->y - current->y) * (x_max - current->x) / (previous->x - current->x)};
         }
     }
 }
@@ -152,32 +137,32 @@ static bool point_inside_polygon(qcp_point_t p, const qcp_polygon_t *polygon)
 
     for (uint32_t i = polygon->count - 1U, j = 0U; j < polygon->count; i = j++)
     {
-        const qcp_point_t a = polygon->vertices[i];
-        const qcp_point_t b = polygon->vertices[j];
+        const qcp_point_t *a = &polygon->vertices[i];
+        const qcp_point_t *b = &polygon->vertices[j];
 
-        if ((p.x == a.x && p.y == a.y) || (p.x == b.x && p.y == b.y))
+        if ((p.x == a->x && p.y == a->y) || (p.x == b->x && p.y == b->y))
         {
             return true;
         }
-        if (a.y == b.y && p.y == a.y && between(p.x, a.x, b.x))
+        if (a->y == b->y && p.y == a->y && between(p.x, a->x, b->x))
         {
             return true;
         }
 
-        if (between(p.y, a.y, b.y))
+        if (between(p.y, a->y, b->y))
         {
             /* 射线恰好穿过顶点时按略低于顶点处理，避免重复计数。 */
-            if ((p.y == a.y && b.y >= a.y) || (p.y == b.y && a.y >= b.y))
+            if ((p.y == a->y && b->y >= a->y) || (p.y == b->y && a->y >= b->y))
             {
                 continue;
             }
 
-            const float cross = (a.x - p.x) * (b.y - p.y) - (b.x - p.x) * (a.y - p.y);
+            const float cross = (a->x - p.x) * (b->y - p.y) - (b->x - p.x) * (a->y - p.y);
             if (cross == 0.0f)
             {
                 return true;
             }
-            if ((a.y < b.y) == (cross > 0.0f))
+            if ((a->y < b->y) == (cross > 0.0f))
             {
                 inside = !inside;
             }
@@ -191,54 +176,69 @@ static bool point_inside_polygon(qcp_point_t p, const qcp_polygon_t *polygon)
 static qcp_point_t best_point_at_intersections(qcp_point_t objective, const qcp_polygon_t *polygon,
                                                const qcp_quadratic_t *quadratic)
 {
-    bool vertex_feasible[QCP_MAX_VERTICES];
     float max_value = -INFINITY;
     qcp_point_t best = {0.0f, 0.0f};
 
-    for (uint32_t index = 0U; index < polygon->count; index++)
-    {
-        const qcp_point_t v = polygon->vertices[index];
-        vertex_feasible[index] = 0.5f * (quadratic->q00 * v.x * v.x + 2.0f * quadratic->q01 * v.x * v.y + quadratic->q11 * v.y * v.y)
-            + quadratic->p0 * v.x + quadratic->p1 * v.y + quadratic->r <= 0.0f;
-    }
-
     for (uint32_t i = polygon->count - 1U, j = 0U; j < polygon->count; i = j++)
     {
-        const qcp_point_t x1 = polygon->vertices[i];
-        const float dx = polygon->vertices[j].x - x1.x;
-        const float dy = polygon->vertices[j].y - x1.y;
-        /* 候选：下标 0 为顶点，1、2 为边上的两个交点参数。 */
-        float parameters[3] = {vertex_feasible[i] ? 0.0f : NAN, NAN, NAN};
+        const qcp_point_t *x1 = &polygon->vertices[i];
+        const qcp_point_t *x2 = &polygon->vertices[j];
+        const float dx = x2->x - x1->x;
+        const float dy = x2->y - x1->y;
+        const bool x1_feasible = 0.5f * (quadratic->q00 * x1->x * x1->x
+                                         + 2.0f * quadratic->q01 * x1->x * x1->y
+                                         + quadratic->q11 * x1->y * x1->y)
+            + quadratic->p0 * x1->x + quadratic->p1 * x1->y + quadratic->r <= 0.0f;
+        const bool x2_feasible = 0.5f * (quadratic->q00 * x2->x * x2->x
+                                         + 2.0f * quadratic->q01 * x2->x * x2->y
+                                         + quadratic->q11 * x2->y * x2->y)
+            + quadratic->p0 * x2->x + quadratic->p1 * x2->y + quadratic->r <= 0.0f;
 
-        if (!vertex_feasible[i] || !vertex_feasible[j])
+        if (x1_feasible)
+        {
+            const float value = objective.x * x1->x + objective.y * x1->y;
+            if (value > max_value || (value == max_value && x1->x >= best.x && x1->y >= best.y))
+            {
+                max_value = value;
+                best = *x1;
+            }
+        }
+
+        if (!x1_feasible || !x2_feasible)
         {
             const float qdx = quadratic->q00 * dx + quadratic->q01 * dy;
             const float qdy = quadratic->q01 * dx + quadratic->q11 * dy;
             const float a = 0.5f * (dx * qdx + dy * qdy);
-            const float b = x1.x * qdx + x1.y * qdy + quadratic->p0 * dx + quadratic->p1 * dy;
-            const float c = 0.5f * (quadratic->q00 * x1.x * x1.x + 2.0f * quadratic->q01 * x1.x * x1.y + quadratic->q11 * x1.y * x1.y)
-                + quadratic->p0 * x1.x + quadratic->p1 * x1.y + quadratic->r;
+            const float b = x1->x * qdx + x1->y * qdy + quadratic->p0 * dx + quadratic->p1 * dy;
+            const float c = 0.5f * (quadratic->q00 * x1->x * x1->x + 2.0f * quadratic->q01 * x1->x * x1->y + quadratic->q11 * x1->y * x1->y)
+                + quadratic->p0 * x1->x + quadratic->p1 * x1->y + quadratic->r;
             const float delta = b * b - 4.0f * a * c;
             if (delta >= 0.0f)
             {
-                parameters[1] = (-b + sqrtf(delta)) / (2.0f * a);
-                parameters[2] = (-b - sqrtf(delta)) / (2.0f * a);
-            }
-        }
+                const float root = sqrtf(delta);
+                float parameter = (-b + root) / (2.0f * a);
+                if (0.0f < parameter && parameter < 1.0f)
+                {
+                    const qcp_point_t point = {x1->x + parameter * dx, x1->y + parameter * dy};
+                    const float value = objective.x * point.x + objective.y * point.y;
+                    if (value > max_value || (value == max_value && point.x >= best.x && point.y >= best.y))
+                    {
+                        max_value = value;
+                        best = point;
+                    }
+                }
 
-        for (uint32_t index = 0U; index < 3U; index++)
-        {
-            const float t = parameters[index];
-            if (!(index == 0U ? t == 0.0f : (0.0f < t && t < 1.0f)))
-            {
-                continue;
-            }
-            const qcp_point_t point = {x1.x + t * dx, x1.y + t * dy};
-            const float value = objective.x * point.x + objective.y * point.y;
-            if (value > max_value || (value == max_value && point.x >= best.x && point.y >= best.y))
-            {
-                max_value = value;
-                best = point;
+                parameter = (-b - root) / (2.0f * a);
+                if (0.0f < parameter && parameter < 1.0f)
+                {
+                    const qcp_point_t point = {x1->x + parameter * dx, x1->y + parameter * dy};
+                    const float value = objective.x * point.x + objective.y * point.y;
+                    if (value > max_value || (value == max_value && point.x >= best.x && point.y >= best.y))
+                    {
+                        max_value = value;
+                        best = point;
+                    }
+                }
             }
         }
     }

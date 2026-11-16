@@ -20,7 +20,7 @@ static bool has_rx;
 
 static float decode_uint16(const uint8_t *data, float min_value, float max_value);
 
-void super_capacitor_update_status(const uint8_t data[SUPER_CAPACITOR_STATUS_LENGTH])
+void super_capacitor_update_status(const uint8_t *data)
 {
     capacitor_data.chassis_power_w = decode_uint16(&data[0], SUPER_CAPACITOR_POWER_MIN_W, SUPER_CAPACITOR_POWER_MAX_W);
     capacitor_data.supercap_voltage_v = decode_uint16(&data[2], 0.0f, SUPER_CAPACITOR_VOLTAGE_MAX_V);
@@ -42,7 +42,7 @@ void super_capacitor_set_command(float charge_power_limit_w, bool enabled)
     command_enabled = enabled;
 }
 
-void super_capacitor_build_command(uint8_t data[SUPER_CAPACITOR_COMMAND_LENGTH])
+void super_capacitor_build_command(uint8_t *data)
 {
     /* 协议以 1 W 为单位的 8 位无符号数表示上限。 */
     data[0] = (uint8_t)fminf(fmaxf(command_power_limit_w, 0.0f), 255.0f);

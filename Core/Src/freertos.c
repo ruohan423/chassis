@@ -82,6 +82,20 @@ const osThreadAttr_t chassis_task_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
+/* Definitions for cancom_task */
+osThreadId_t cancom_taskHandle;
+const osThreadAttr_t cancom_task_attributes = {
+  .name = "cancom_task",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for usbcom_task */
+osThreadId_t usbcom_taskHandle;
+const osThreadAttr_t usbcom_task_attributes = {
+  .name = "usbcom_task",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
 /* Definitions for RemoteSem */
 osSemaphoreId_t RemoteSemHandle;
 const osSemaphoreAttr_t RemoteSem_attributes = {
@@ -103,6 +117,8 @@ void Remote_Task(void *argument);
 void Watchdog_Task(void *argument);
 void Judge_Task(void *argument);
 void Chassis_Task(void *argument);
+void CanCom_Task(void *argument);
+void UsbCom_Task(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -155,6 +171,12 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of chassis_task */
   chassis_taskHandle = osThreadNew(Chassis_Task, NULL, &chassis_task_attributes);
+
+  /* creation of cancom_task */
+  cancom_taskHandle = osThreadNew(CanCom_Task, NULL, &cancom_task_attributes);
+
+  /* creation of usbcom_task */
+  usbcom_taskHandle = osThreadNew(UsbCom_Task, NULL, &usbcom_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
 
@@ -256,6 +278,42 @@ __weak void Chassis_Task(void *argument)
     osDelay(1);
   }
   /* USER CODE END Chassis_Task */
+}
+
+/* USER CODE BEGIN Header_CanCom_Task */
+/**
+* @brief Function implementing the cancom_task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_CanCom_Task */
+__weak void CanCom_Task(void *argument)
+{
+  /* USER CODE BEGIN CanCom_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END CanCom_Task */
+}
+
+/* USER CODE BEGIN Header_UsbCom_Task */
+/**
+* @brief Function implementing the usbcom_task thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_UsbCom_Task */
+__weak void UsbCom_Task(void *argument)
+{
+  /* USER CODE BEGIN UsbCom_Task */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END UsbCom_Task */
 }
 
 /* Private application code --------------------------------------------------*/

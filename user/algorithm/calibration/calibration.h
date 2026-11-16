@@ -27,7 +27,7 @@ typedef struct
     float max_temp_drift;
 } gyro_cal_cfg_t;
 
-/* 填充 BMI088/Rust 兼容的静止校准默认配置。 */
+/* config 为调用方持有的输出对象，仅在调用期间写入且不保存指针。 */
 void gyro_cal_default(gyro_cal_cfg_t *config);
 
 typedef enum
@@ -64,14 +64,14 @@ typedef struct
     bool has_time;
 } gyro_cal_t;
 
-/* 初始化空的静止陀螺仪校准窗口。 */
+/* cal 为调用方持有的可写会话状态；config 仅在调用期间只读借用并复制，函数不会保存指针。 */
 void gyro_cal_init(gyro_cal_t *cal, const gyro_cal_cfg_t *config);
 
-/* 向校准窗口加入一个国际单位制 IMU 样本。 */
-cal_status_t gyro_cal_push(gyro_cal_t *cal, uint32_t time_ms, const float gyr[CAL_AXES],
-                           const float acc[CAL_AXES], bool acc_ready, float temp_c);
+/* 向校准窗口加入一个国际单位制 IMU 样本；输入数组仅在调用期间借用，不会被保存或修改。 */
+cal_status_t gyro_cal_push(gyro_cal_t *cal, uint32_t time_ms, const float *gyr,
+                           const float *acc, bool acc_ready, float temp_c);
 
-/* 校验已完成的校准窗口并返回零偏估计值。 */
+/* cal 仅在调用期间只读借用；result 为调用方输出对象，仅在成功时写入且不保存指针。 */
 cal_status_t gyro_cal_finish(const gyro_cal_t *cal, gyro_bias_t *result);
 
 #endif

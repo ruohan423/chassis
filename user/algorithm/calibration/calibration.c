@@ -18,7 +18,7 @@ void gyro_cal_default(gyro_cal_cfg_t *config)
     };
 }
 
-static void update_statistics(uint32_t count,const float sample[CAL_AXES],float mean[CAL_AXES],float m2[CAL_AXES])
+static void update_statistics(uint32_t count, const float *sample, float *mean, float *m2)
 {
     for (size_t axis = 0; axis < CAL_AXES; ++axis) {
         const float error_from_mean = sample[axis] - mean[axis];
@@ -27,7 +27,7 @@ static void update_statistics(uint32_t count,const float sample[CAL_AXES],float 
     }
 }
 
-static float max_sigma(uint32_t n, const float m2[CAL_AXES])
+static float max_sigma(uint32_t n, const float *m2)
 {
     const float denom = (float)(n - 1U);
     float max_sigma = 0.0f;
@@ -48,8 +48,8 @@ void gyro_cal_init(gyro_cal_t *gyro_cal, const gyro_cal_cfg_t *config)
     gyro_cal->temp_max = -INFINITY;
 }
 
-cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float gyr[CAL_AXES],
-                           const float accel_ms2[CAL_AXES], bool acc_ready, float temp_c)
+cal_status_t gyro_cal_push(gyro_cal_t *gyro_cal, uint32_t time_ms, const float *gyr,
+                           const float *accel_ms2, bool acc_ready, float temp_c)
 {
     if (gyro_cal->has_time) {
         const uint32_t elapsed_ms = time_ms - gyro_cal->last_ms;

@@ -32,8 +32,8 @@ void cal_session_start(cal_session_t *session)
 cal_status_t cal_session_push(
     cal_session_t *session,
     uint32_t time_ms,
-    const float gyr[CAL_AXES],
-    const float accel_ms2[CAL_AXES],
+    const float *gyr,
+    const float *accel_ms2,
     bool acc_ready,
     float temp_c)
 {
