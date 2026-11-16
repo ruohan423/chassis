@@ -95,7 +95,14 @@
 #define CHASSIS_POWER_BUFFER_LIMIT_J  30.0f  /* 虚拟缓冲能量上限，单位 J */
 #define CHASSIS_POWER_EXCESS_W        15.0f  /* 缓冲满时允许超出功率上限的功率，单位 W */
 #define CHASSIS_POWER_BOOST_EXCESS_W  80.0f  /* boost 允许超出裁判上限的功率，单位 W */
-#define CHASSIS_POWER_OFFLINE_LIMIT_W 85.0f  /* 裁判离线时的固定功率上限，单位 W；沿用原工程哨兵 100 W × 0.85，须按规则核对 */
+#define CHASSIS_POWER_OFFLINE_LIMIT_W 85.0f  /* 裁判离线时受功率约束模式的固定功率上限，单位 W；沿用原工程哨兵 100 W × 0.85，须按规则核对 */
+
+/* 不限功率模式（遥控器 s2=1）的硬件保护：不看裁判功率上限和缓冲能量，只保护电源、电调和电机。
+ * 单轮电流上限沿用 CHASSIS_MOTOR_CURRENT_LIMIT_A；超限时四轮同比例缩小，保持合力方向。
+ * 该模式下超出裁判上限的功率照常消耗裁判缓冲能量，是否在比赛中使用由操作者决定。 */
+#define CHASSIS_SUPPLY_POWER_LIMIT_W      480.0f  /* 供电功率上限，单位 W，代替裁判上限进入功率模型约束；暂按 24 V × 20 A，待按电池与电源管理模块的持续输出能力核对 */
+#define CHASSIS_MOTOR_TEMP_DERATE_START_C 80.0f   /* 最热电机的反馈温度高于该值后线性压低单轮电流上限，单位 ℃；待按 M3508 手册和实测温升核对 */
+#define CHASSIS_MOTOR_TEMP_CUTOFF_C       100.0f  /* 最热电机的反馈温度达到该值时单轮电流上限降为零，单位 ℃，须大于起始值；待核对 */
 
 /* 超级电容分档沿用 RMCS ChassisPowerController；电压阈值须按实车电容组核对，能量阈值须按当年规则核对。
  * boost 功率随电压线性放开，充电功率随裁判缓冲能量分两段放开；电容离线时 boost 不生效。 */

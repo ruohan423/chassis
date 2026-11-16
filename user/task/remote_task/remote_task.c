@@ -117,17 +117,17 @@ static void RemoteCallback(const Remote *rc)
 
     if (rc->s2 != 1) {return;}
 
-    /* s2=1 为遥控器模式：s1=1 自由模式，s1=2 跟随云台且不限功率，s1=3 快速小陀螺。 */
+    /* s2=1 的子模式均不受功率约束：s1=1 自由控制，s1=2 跟随云台，s1=3 小陀螺。 */
     switch (rc->s1)
     {
     case 1:
-        actChassis = CHASSIS_FREE;
+        actChassis = CHASSIS_FREE_UNLIMITED;
         break;
     case 2:
-        actChassis = CHASSIS_GIMBAL_FOLLOW_POWERED;
+        actChassis = CHASSIS_FOLLOW_UNLIMITED;
         break;
     case 3:
-        actChassis = CHASSIS_SPIN_FAST;
+        actChassis = CHASSIS_SPIN_UNLIMITED;
         break;
     default:
         break;
@@ -144,8 +144,21 @@ static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey)
     /* 停止态只能由遥控输入模式的复位流程退出。 */
     if (actChassis == CHASSIS_STOP){return;}
 
-    /* 本回调只在 s2=3 时调用。s1=2 为全自动，只取上位机指令；s1=1、s1=3 功能暂定，先固定为自由模式。 */
-    actChassis = rc_data.rc.s1 == 2 ? CHASSIS_AUTO : CHASSIS_FREE;
+    /* 本回调只在 s2=3 时调用，子模式均受功率约束：s1=1 自由控制，s1=2 全自动（只取上位机指令），s1=3 小陀螺。 */
+    switch (rc_data.rc.s1)
+    {
+    case 1:
+        actChassis = CHASSIS_FREE;
+        break;
+    case 2:
+        actChassis = CHASSIS_AUTO;
+        break;
+    case 3:
+        actChassis = CHASSIS_SPIN;
+        break;
+    default:
+        break;
+    }
 }
 
 

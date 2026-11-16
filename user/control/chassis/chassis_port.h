@@ -12,16 +12,18 @@ typedef struct
     volatile float speed_rad_s;      /* 轮侧角速度 rad/s */
     float output;                    /* 方向归一化后的电流原始指令 */
     volatile uint32_t feedback_tick; /* HAL 毫秒时钟，仅 port 层解释 */
-    volatile bool has_feedback;
+    volatile uint8_t temperature_c;  /* 电调反馈的电机温度 ℃ */
+    volatile bool has_feedback;      /* 上电后收到过反馈帧 */
 } chassis_motor_t;
 
 extern chassis_motor_t chassis_motors[CHASSIS_MOTOR_COUNT];
 
 bool chassis_port_init(void);
-/* 每个控制周期调用一次：下发四轮指令并更新电容充电功率上限（单位 W）。离线电机的指令在此清零；发送失败返回 false。 */
-bool chassis_port_send(float supercap_charge_power_limit_w);
-/* chassis_motor 仅在调用期间只读借用，函数不会保存指针。 */
-bool chassis_motor_is_online(const chassis_motor_t *chassis_motor);
+/* 每个控制周期调用一次：下发四轮指令并更新电容充电功率上限 charge_limit_w（单位 W）。
+ * 离线电机的指令在此清零，各轮指令限幅到 CHASSIS_MOTOR_OUTPUT_LIMIT；发送失败返回 false。 */
+bool chassis_port_send(float charge_limit_w);
+/* motor 仅在调用期间只读借用，函数不会保存指针。 */
+bool chassis_motor_is_online(const chassis_motor_t *motor);
 
 /* 裁判、电容与姿态反馈快照，已做在线判断和单位换算。
  * 云台相对角约定：云台正前方与底盘正前方（x 轴）重合时为 0，俯视云台相对底盘逆时针转动为正；
@@ -43,8 +45,8 @@ typedef struct
     bool gimbal_online;           /* 云台角度与角速度反馈未超时且数值有效 */
 } chassis_feedback_t;
 
-/* 仅任务上下文调用；chassis_feedback 为调用方输出对象，仅在调用期间写入且不保存指针。
+/* 仅任务上下文调用；feedback 为调用方输出对象，仅在调用期间写入且不保存指针。
  * 内部以调度锁保护裁判、电容和姿态数据的快照复制，调用方不再加锁。 */
-void chassis_port_read_feedback(uint32_t current_tick, chassis_feedback_t *chassis_feedback);
+void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback);
 
 #endif
