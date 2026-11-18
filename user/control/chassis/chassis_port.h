@@ -37,7 +37,7 @@ typedef struct
     float yaw_rate_rad_s;         /* 底盘 IMU 的 yaw 角速度 rad/s，yaw_rate_valid 为真时有效 */
     float gimbal_yaw_angle;       /* 云台相对底盘的 yaw 角 rad，范围 0～2π；云台在线时有效 */
     float gimbal_yaw_rate_rad_s;  /* 云台 yaw 角速度 rad/s；云台在线时有效 */
-    float gimbal_yaw_angle_error; /* 云台 yaw 控制误差（目标减实测）rad，范围 -π～π，正方向同相对角；来源未接入，恒为 0 */
+    float gimbal_yaw_target_offset_rad; /* 云台目标角相对实测角的偏移量 rad，正方向同相对角；来源未接入，当前为 0 */
     bool referee_online;          /* 机器人性能与功率热量数据均未超时 */
     bool supercap_online;         /* 电容在线，实测功率和电压可信 */
     bool supercap_enabled;        /* 电容允许放电，离线时为假 */

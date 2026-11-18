@@ -24,6 +24,16 @@ typedef struct
     float wz;
 } chassis_velocity_t;
 
+/* 行为请求：resolve_target 中模式表的结果、行为表的输入，尚未做坐标系换算和限幅。
+ * 每个周期由模式表完整写入；各行为只采用自己用到的字段，其余字段填零。 */
+typedef struct
+{
+    float vx;              /* x 向平移请求，向前为正，单位 m/s；直控和爬坡在底盘坐标系，其余行为在云台坐标系 */
+    float vy;              /* y 向平移请求，向左为正，单位 m/s；坐标系同 vx */
+    float wz;              /* 自转请求，逆时针为正，单位 rad/s；仅直控采用 */
+    float climb_yaw_error; /* 爬坡朝向减底盘实测朝向，单位 rad，未折算到 -π～π；仅爬坡采用 */
+} chassis_request_t;
+
 volatile chassis_mode_t actChassis = CHASSIS_FREE;
 
 static pid_calculator_t vx_pid;
@@ -35,7 +45,6 @@ static float control_period_s;
 static float virtual_buffer_j;         /* 虚拟缓冲能量 J */
 static float expected_power_w;         /* 上一周期期望的功率上限 W，作为虚拟缓冲能量的积分基准 */
 static bool spin_forward = true;       /* 小陀螺方向，真为逆时针 */
-static bool remote_spin_active;        /* 上一周期处于遥控器小陀螺子模式 */
 static uint32_t spin_stuck_cycles;     /* 小陀螺低速已持续的周期数 */
 static uint32_t spin_cooldown_cycles;  /* 换向后剩余的检测冷却周期数 */
 static uint32_t spin_stuck_confirm_cycles;
@@ -43,7 +52,7 @@ static uint32_t spin_cooldown_reload_cycles;
 
 static void reset_control(void);
 static void update_spin_watchdog(chassis_behavior_t behavior, const chassis_feedback_t *feedback);
-static void resolve_target(chassis_behavior_t behavior, const chassis_command_t *command,
+static void resolve_target(chassis_mode_t mode, const chassis_command_t *command,
                            const chassis_feedback_t *feedback, chassis_velocity_t *target);
 static float update_power_limit(bool power_unlimited, bool boost, const chassis_feedback_t *feedback);
 
@@ -52,7 +61,6 @@ bool chassis_init(float period_s)
     control_period_s = period_s;
     spin_stuck_confirm_cycles = (uint32_t)(CHASSIS_SPIN_STUCK_CONFIRM_S / period_s + 0.5f);
     spin_cooldown_reload_cycles = (uint32_t)(CHASSIS_SPIN_REVERSE_COOLDOWN_S / period_s + 0.5f);
-
     pid_calculator_init(&vx_pid, CHASSIS_TRANSLATION_KP, CHASSIS_TRANSLATION_KI, CHASSIS_TRANSLATION_KD);
     pid_calculator_init(&vy_pid, CHASSIS_TRANSLATION_KP, CHASSIS_TRANSLATION_KI, CHASSIS_TRANSLATION_KD);
     pid_calculator_init(&wz_pid, CHASSIS_ANGULAR_KP, CHASSIS_ANGULAR_KI, CHASSIS_ANGULAR_KD);
@@ -82,9 +90,7 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
     static chassis_velocity_t target;
 
     const chassis_mode_t mode = actChassis;
-    const bool power_unlimited = mode == CHASSIS_FREE_UNLIMITED || mode == CHASSIS_FOLLOW_UNLIMITED
-        || mode == CHASSIS_SPIN_UNLIMITED;
-    const bool remote_spin = mode == CHASSIS_SPIN || mode == CHASSIS_SPIN_UNLIMITED;
+    const bool power_unlimited = mode == CHASSIS_FREE_UNLIMITED || mode == CHASSIS_FOLLOW_UNLIMITED|| mode == CHASSIS_SPIN_UNLIMITED;
     bool motors_online = true;
 
     for (uint32_t i = 0U; i < CHASSIS_MOTOR_COUNT; i++)
@@ -110,13 +116,6 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
                               / (CHASSIS_SUPERCAP_CHARGE_FULL_J - CHASSIS_SUPERCAP_CHARGE_BASE_J), 0.0f, 1.0f);
     }
 
-    /* 遥控器切入小陀螺子模式时换向，仅切换功率约束时不换向；全自动下上位机指定的小陀螺不改变方向。 */
-    if (remote_spin && !remote_spin_active)
-    {
-        spin_forward = !spin_forward;
-    }
-    remote_spin_active = remote_spin;
-
     /* 底盘速度由四轮共同解算，任一轮无反馈时估计失效，四轮一起停止。 */
     if (mode == CHASSIS_STOP || !motors_online)
     {
@@ -124,47 +123,8 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
         return chassis_port_send(charge_limit_w);
     }
 
-    /* 行为和输入来源由模式唯一决定，两种来源不叠加：遥控器子模式各固定一种行为，只取摇杆；
-     * 全自动只取上位机指令及其指定的子行为，链路离线时为直控零速度。
-     * target 先存选定来源的平移和自转请求，再由 resolve_target 原地换算为底盘坐标系下的最终目标。 */
-    chassis_behavior_t behavior = CHASSIS_BEHAVIOR_DIRECT;
-    target = (chassis_velocity_t){0};
-    if (mode != CHASSIS_AUTO)
-    {
-        if (mode == CHASSIS_FOLLOW_UNLIMITED)
-        {
-            behavior = CHASSIS_BEHAVIOR_GIMBAL_FOLLOW;
-        }
-        else if (remote_spin)
-        {
-            behavior = CHASSIS_BEHAVIOR_SPIN_FAST;
-        }
-        target.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
-        target.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
-        target.wz = command->stick_wz * CHASSIS_MAX_ANGULAR_RAD_S;
-    }
-    else
-    {
-        if (command->nav_online)
-        {
-            behavior = command->nav_behavior;
-            target.vx = command->nav_vx;
-            target.vy = command->nav_vy;
-            target.wz = command->nav_wz;
-        }
-        /* 爬坡输入有效时进入爬坡；上位机指定爬坡而输入无效时退回直控。 */
-        if (isfinite(command->climb_direction) && isfinite(command->climb_speed) && isfinite(command->climb_yaw))
-        {
-            behavior = CHASSIS_BEHAVIOR_CLIMB;
-        }
-        else if (behavior == CHASSIS_BEHAVIOR_CLIMB)
-        {
-            behavior = CHASSIS_BEHAVIOR_DIRECT;
-        }
-    }
-
-    update_spin_watchdog(behavior, &feedback);
-    resolve_target(behavior, command, &feedback, &target);
+    /* 速度目标：模式、输入和反馈解算为底盘坐标系下的速度目标，模式表、卡死换向和行为表都在 resolve_target 里。 */
+    resolve_target(mode, command, &feedback, &target);
     if (!isfinite(target.vx) || !isfinite(target.vy) || !isfinite(target.wz))
     {
         /* 目标无效时与停止态同样处理，对应 RMCS 对 NaN 速度目标的复位。 */
@@ -315,54 +275,160 @@ static void update_spin_watchdog(chassis_behavior_t behavior, const chassis_feed
     spin_stuck_cycles = 0U;
 }
 
-/* 行为目标：平移请求按行为确定坐标系并整体限幅，自转按行为生成。
- * 调用时 target 为模式选定来源的平移和自转请求，返回时为底盘坐标系下的速度目标。 */
-static void resolve_target(chassis_behavior_t behavior, const chassis_command_t *command,
+/* 速度目标解算：模式 + 输入 + 反馈 → 底盘坐标系下的速度目标，每次调用完整写入 target。
+ * 依次为模式表、小陀螺卡死换向、行为表三步：模式表定行为和请求，行为表把请求解算成 vx、vy、wz。
+ * 两张表都是每个 case 独立写全、互不依赖，看一个模式或一个行为只需看它自己的 case。 */
+static void resolve_target(chassis_mode_t mode, const chassis_command_t *command,
                            const chassis_feedback_t *feedback, chassis_velocity_t *target)
 {
-    if (behavior == CHASSIS_BEHAVIOR_CLIMB)
+    chassis_behavior_t behavior;
+    chassis_request_t request;
+
+    /* 模式表：模式唯一决定“做哪种行为”和“请求取自哪个来源”，来源不叠加。
+     * 这里只定行为、照抄请求，不做换算；行为用不到的请求字段填零。 */
+    switch (mode)
     {
-        /* 爬坡速度以底盘正向为正向：上坡为正前进，下坡为负倒车。 */
-        target->vx = command->climb_speed;
-        target->vy = 0.0f;
-    }
-    else
-    {
-        /* 直控的平移请求已在底盘坐标系；其余行为在云台坐标系，按云台相对角转到底盘坐标系。 */
-        if (behavior != CHASSIS_BEHAVIOR_DIRECT)
+    case CHASSIS_FREE:
+        /* 自由控制：直控，平移和自转取摇杆。 */
+        behavior = CHASSIS_BEHAVIOR_DIRECT;
+        request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
+        request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
+        request.wz = command->stick_wz * CHASSIS_MAX_ANGULAR_RAD_S;
+        request.climb_yaw_error = 0.0f;
+        break;
+
+    case CHASSIS_AUTO:
+        /* 全自动：隔离摇杆，下面三种情形互斥。 */
+        if (isfinite(command->climb_direction) && isfinite(command->climb_speed) && isfinite(command->climb_yaw))
         {
-            const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
-            const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
-            const float gimbal_vx = target->vx;
-            target->vx = cos_yaw * gimbal_vx - sin_yaw * target->vy;
-            target->vy = sin_yaw * gimbal_vx + cos_yaw * target->vy;
+            /* 爬坡输入有效：爬坡，请求取爬坡输入；优先于上位机子行为，上位机离线时同样生效。
+             * 爬坡速度以底盘正向为正向：上坡为正前进，下坡为负倒车。 */
+            behavior = CHASSIS_BEHAVIOR_CLIMB;
+            request.vx = command->climb_speed;
+            request.vy = 0.0f;
+            request.wz = 0.0f;
+            request.climb_yaw_error = command->climb_direction - command->climb_yaw;
         }
-        const float speed = hypotf(target->vx, target->vy);
-        if (speed > CHASSIS_MAX_TRANSLATION_MPS)
+        else if (command->nav_online)
         {
-            target->vx *= CHASSIS_MAX_TRANSLATION_MPS / speed;
-            target->vy *= CHASSIS_MAX_TRANSLATION_MPS / speed;
+            /* 上位机在线：上位机指定的子行为，请求取上位机速度；指定爬坡而爬坡输入无效时退回直控。 */
+            behavior = command->nav_behavior == CHASSIS_BEHAVIOR_CLIMB ? CHASSIS_BEHAVIOR_DIRECT : command->nav_behavior;
+            request.vx = command->nav_vx;
+            request.vy = command->nav_vy;
+            request.wz = command->nav_wz;
+            request.climb_yaw_error = 0.0f;
         }
+        else
+        {
+            /* 上位机离线：停止，请求为零。 */
+            behavior = CHASSIS_BEHAVIOR_STOP;
+            request.vx = 0.0f;
+            request.vy = 0.0f;
+            request.wz = 0.0f;
+            request.climb_yaw_error = 0.0f;
+        }
+        break;
+
+    case CHASSIS_SPIN:
+        /* 小陀螺：快速小陀螺，平移取摇杆。 */
+        behavior = CHASSIS_BEHAVIOR_SPIN_FAST;
+        request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
+        request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
+        request.wz = 0.0f;
+        request.climb_yaw_error = 0.0f;
+        break;
+
+    case CHASSIS_FREE_UNLIMITED:
+        /* 不限功率的自由控制：行为和请求同 CHASSIS_FREE。 */
+        behavior = CHASSIS_BEHAVIOR_DIRECT;
+        request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
+        request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
+        request.wz = command->stick_wz * CHASSIS_MAX_ANGULAR_RAD_S;
+        request.climb_yaw_error = 0.0f;
+        break;
+
+    case CHASSIS_FOLLOW_UNLIMITED:
+        /* 不限功率的跟随云台：跟随云台，平移取摇杆。 */
+        behavior = CHASSIS_BEHAVIOR_GIMBAL_FOLLOW;
+        request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
+        request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
+        request.wz = 0.0f;
+        request.climb_yaw_error = 0.0f;
+        break;
+
+    case CHASSIS_SPIN_UNLIMITED:
+        /* 不限功率的小陀螺：行为和请求同 CHASSIS_SPIN。 */
+        behavior = CHASSIS_BEHAVIOR_SPIN_FAST;
+        request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
+        request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
+        request.wz = 0.0f;
+        request.climb_yaw_error = 0.0f;
+        break;
+
+    case CHASSIS_STOP:
+    default:
+        /* 停止：chassis_update 已提前返回，不会走到这里；非法模式值同样按停止处理。 */
+        behavior = CHASSIS_BEHAVIOR_STOP;
+        request.vx = 0.0f;
+        request.vy = 0.0f;
+        request.wz = 0.0f;
+        request.climb_yaw_error = 0.0f;
+        break;
     }
 
+    /* 小陀螺卡死换向：每周期都要更新，且必须在行为确定之后、行为表用小陀螺方向之前。 */
+    update_spin_watchdog(behavior, feedback);
+
+    /* 行为表：每个行为写全 vx、vy、wz。平移请求在云台坐标系的行为按云台相对底盘的 yaw 角转到底盘坐标系。 */
     switch (behavior)
     {
-    case CHASSIS_BEHAVIOR_DIRECT:
-        target->wz = float_constrain(target->wz, -CHASSIS_MAX_ANGULAR_RAD_S, CHASSIS_MAX_ANGULAR_RAD_S);
+    case CHASSIS_BEHAVIOR_STOP:
+    {
+        /* 停止：平移和自转均为零。 */
+        target->vx = 0.0f;
+        target->vy = 0.0f;
+        target->wz = 0.0f;
         break;
+    }
+
+    case CHASSIS_BEHAVIOR_DIRECT:
+    {
+        /* 直控：平移请求已在底盘坐标系，直接采用；自转采用请求，限幅到角速度上限。 */
+        target->vx = request.vx;
+        target->vy = request.vy;
+        target->wz = float_constrain(request.wz, -CHASSIS_MAX_ANGULAR_RAD_S, CHASSIS_MAX_ANGULAR_RAD_S);
+        break;
+    }
 
     case CHASSIS_BEHAVIOR_SPIN_SLOW:
+    {
+        /* 慢速小陀螺：平移请求在云台坐标系；自转为固定角速度，方向取卡死换向维护的小陀螺方向。 */
+        const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
+        const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
+        target->vx = cos_yaw * request.vx - sin_yaw * request.vy;
+        target->vy = sin_yaw * request.vx + cos_yaw * request.vy;
         target->wz = CHASSIS_SPIN_SLOW_RATIO * (spin_forward ? CHASSIS_MAX_ANGULAR_RAD_S : -CHASSIS_MAX_ANGULAR_RAD_S);
         break;
+    }
 
     case CHASSIS_BEHAVIOR_SPIN_FAST:
+    {
+        /* 快速小陀螺：同慢速小陀螺，只是自转比例不同。 */
+        const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
+        const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
+        target->vx = cos_yaw * request.vx - sin_yaw * request.vy;
+        target->vy = sin_yaw * request.vx + cos_yaw * request.vy;
         target->wz = CHASSIS_SPIN_FAST_RATIO * (spin_forward ? CHASSIS_MAX_ANGULAR_RAD_S : -CHASSIS_MAX_ANGULAR_RAD_S);
         break;
+    }
 
     case CHASSIS_BEHAVIOR_GIMBAL_FOLLOW:
     {
+        /* 跟随云台：平移请求在云台坐标系；自转由角度环跟随云台朝向。 */
+        const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
+        const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
         /* 底盘相对云台目标朝向的无符号角误差，范围 0～2π。 */
-        float yaw_error = feedback->gimbal_yaw_angle_error;
+        float yaw_error = feedback->gimbal_yaw_target_offset_rad;
         if (yaw_error < 0.0f)
         {
             yaw_error += TWO_PI;
@@ -378,15 +444,31 @@ static void resolve_target(chassis_behavior_t behavior, const chassis_command_t 
         {
             yaw_error -= TWO_PI;
         }
+        target->vx = cos_yaw * request.vx - sin_yaw * request.vy;
+        target->vy = sin_yaw * request.vx + cos_yaw * request.vy;
         target->wz = pid_calculator_update(&follow_pid, yaw_error);
         break;
     }
 
     case CHASSIS_BEHAVIOR_CLIMB:
-        /* 跟随爬坡朝向，角误差折算到 -π～π。 */
-        target->wz = pid_calculator_update(&follow_pid,
-                                           remainderf(command->climb_direction - command->climb_yaw, TWO_PI));
+    {
+        /* 爬坡：平移请求已在底盘坐标系，直接采用；自转由角度环跟随爬坡朝向，角误差折算到 -π～π。 */
+        target->vx = request.vx;
+        target->vy = request.vy;
+        target->wz = pid_calculator_update(&follow_pid, remainderf(request.climb_yaw_error, TWO_PI));
         break;
+    }
+    }
+
+    /* 平移限幅：合速度超过上限时两轴等比例缩小，保持方向。爬坡速度由爬坡输入给定，不在此限幅。 */
+    if (behavior != CHASSIS_BEHAVIOR_CLIMB)
+    {
+        const float speed = hypotf(target->vx, target->vy);
+        if (speed > CHASSIS_MAX_TRANSLATION_MPS)
+        {
+            target->vx *= CHASSIS_MAX_TRANSLATION_MPS / speed;
+            target->vy *= CHASSIS_MAX_TRANSLATION_MPS / speed;
+        }
     }
 }
 

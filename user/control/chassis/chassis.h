@@ -25,7 +25,8 @@ typedef enum
  * 全自动下作为子行为由上位机指定。 */
 typedef enum
 {
-    CHASSIS_BEHAVIOR_DIRECT = 0,    /* 直控：x、y 平移和自转均在底盘坐标系，直接作为速度目标；全自动下链路离线时为该行为且速度为零 */
+    CHASSIS_BEHAVIOR_STOP = 0,      /* 停止：平移与自转目标均为零；全自动下链路离线时使用 */
+    CHASSIS_BEHAVIOR_DIRECT,        /* 直控：x、y 平移和自转均在底盘坐标系，直接作为速度目标 */
     CHASSIS_BEHAVIOR_SPIN_SLOW,     /* 慢速小陀螺：x、y 平移在云台坐标系，自转为角速度上限的 CHASSIS_SPIN_SLOW_RATIO */
     CHASSIS_BEHAVIOR_SPIN_FAST,     /* 快速小陀螺：x、y 平移在云台坐标系，自转为角速度上限的 CHASSIS_SPIN_FAST_RATIO */
     CHASSIS_BEHAVIOR_GIMBAL_FOLLOW, /* 跟随云台：x、y 平移在云台坐标系，自转使底盘正前方对齐云台 */
