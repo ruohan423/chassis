@@ -28,10 +28,10 @@ typedef struct
  * 每个周期由模式表完整写入；各行为只采用自己用到的字段，其余字段填零。 */
 typedef struct
 {
-    float vx;              /* x 向平移请求，向前为正，单位 m/s；直控和爬坡在底盘坐标系，其余行为在云台坐标系 */
-    float vy;              /* y 向平移请求，向左为正，单位 m/s；坐标系同 vx */
-    float wz;              /* 自转请求，逆时针为正，单位 rad/s；仅直控采用 */
-    float climb_yaw_error; /* 爬坡朝向减底盘实测朝向，单位 rad，未折算到 -π～π；仅爬坡采用 */
+    float vx;         /* x 向平移请求，向前为正，单位 m/s；直控和爬坡在底盘坐标系，跟随云台在云台坐标系，其余行为在上电世界系 */
+    float vy;         /* y 向平移请求，向左为正，单位 m/s；坐标系同 vx */
+    float wz;         /* 自转请求，逆时针为正，单位 rad/s；仅直控采用 */
+    float target_yaw; /* 上电世界系下的目标朝向，单位 rad，与底盘 IMU 的 yaw 同一基准；仅两面对齐、单面对齐和爬坡采用 */
 } chassis_request_t;
 
 volatile chassis_mode_t actChassis = CHASSIS_FREE;
@@ -255,11 +255,11 @@ static void update_spin_watchdog(chassis_behavior_t behavior, const chassis_feed
         return;
     }
 
-    /* 没有角速度数据时不判定，避免姿态解算启动前误换向。 */
+    /* 没有 IMU 数据时不判定，避免姿态解算启动前误换向。 */
     const float spin_speed = (behavior == CHASSIS_BEHAVIOR_SPIN_FAST ? CHASSIS_SPIN_FAST_RATIO : CHASSIS_SPIN_SLOW_RATIO)
         * CHASSIS_MAX_ANGULAR_RAD_S;
     if ((behavior != CHASSIS_BEHAVIOR_SPIN_FAST && behavior != CHASSIS_BEHAVIOR_SPIN_SLOW)
-        || !feedback->yaw_rate_valid
+        || !feedback->imu_valid
         || fabsf(feedback->yaw_rate_rad_s) >= CHASSIS_SPIN_STUCK_SPEED_RATIO * spin_speed)
     {
         spin_stuck_cycles = 0U;
@@ -276,7 +276,7 @@ static void update_spin_watchdog(chassis_behavior_t behavior, const chassis_feed
 }
 
 /* 速度目标解算：模式 + 输入 + 反馈 → 底盘坐标系下的速度目标，每次调用完整写入 target。
- * 依次为模式表、小陀螺卡死换向、行为表三步：模式表定行为和请求，行为表把请求解算成 vx、vy、wz。
+ * 依次为模式表、上电世界系基准检查、小陀螺卡死换向、行为表：模式表定行为和请求，行为表把请求解算成 vx、vy、wz。
  * 两张表都是每个 case 独立写全、互不依赖，看一个模式或一个行为只需看它自己的 case。 */
 static void resolve_target(chassis_mode_t mode, const chassis_command_t *command,
                            const chassis_feedback_t *feedback, chassis_velocity_t *target)
@@ -294,12 +294,12 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
         request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
         request.wz = command->stick_wz * CHASSIS_MAX_ANGULAR_RAD_S;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
 
     case CHASSIS_AUTO:
         /* 全自动：隔离摇杆，下面三种情形互斥。 */
-        if (isfinite(command->climb_direction) && isfinite(command->climb_speed) && isfinite(command->climb_yaw))
+        if (isfinite(command->climb_direction) && isfinite(command->climb_speed))
         {
             /* 爬坡输入有效：爬坡，请求取爬坡输入；优先于上位机子行为，上位机离线时同样生效。
              * 爬坡速度以底盘正向为正向：上坡为正前进，下坡为负倒车。 */
@@ -307,16 +307,16 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
             request.vx = command->climb_speed;
             request.vy = 0.0f;
             request.wz = 0.0f;
-            request.climb_yaw_error = command->climb_direction - command->climb_yaw;
+            request.target_yaw = command->climb_direction;
         }
         else if (command->nav_online)
         {
-            /* 上位机在线：上位机指定的子行为，请求取上位机速度；指定爬坡而爬坡输入无效时退回直控。 */
+            /* 上位机在线：上位机指定的子行为，请求取上位机速度和目标朝向；指定爬坡而爬坡输入无效时退回直控。 */
             behavior = command->nav_behavior == CHASSIS_BEHAVIOR_CLIMB ? CHASSIS_BEHAVIOR_DIRECT : command->nav_behavior;
             request.vx = command->nav_vx;
             request.vy = command->nav_vy;
             request.wz = command->nav_wz;
-            request.climb_yaw_error = 0.0f;
+            request.target_yaw = command->nav_target_yaw;
         }
         else
         {
@@ -325,7 +325,7 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
             request.vx = 0.0f;
             request.vy = 0.0f;
             request.wz = 0.0f;
-            request.climb_yaw_error = 0.0f;
+            request.target_yaw = 0.0f;
         }
         break;
 
@@ -335,7 +335,7 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
         request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
         request.wz = 0.0f;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
 
     case CHASSIS_FREE_UNLIMITED:
@@ -344,7 +344,7 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
         request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
         request.wz = command->stick_wz * CHASSIS_MAX_ANGULAR_RAD_S;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
 
     case CHASSIS_FOLLOW_UNLIMITED:
@@ -353,7 +353,7 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
         request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
         request.wz = 0.0f;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
 
     case CHASSIS_SPIN_UNLIMITED:
@@ -362,7 +362,7 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = command->stick_x * CHASSIS_MAX_TRANSLATION_MPS;
         request.vy = command->stick_y * CHASSIS_MAX_TRANSLATION_MPS;
         request.wz = 0.0f;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
 
     case CHASSIS_STOP:
@@ -372,14 +372,22 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         request.vx = 0.0f;
         request.vy = 0.0f;
         request.wz = 0.0f;
-        request.climb_yaw_error = 0.0f;
+        request.target_yaw = 0.0f;
         break;
+    }
+
+    /* 上电世界系基准：除直控和跟随云台外，各行为的平移换算或朝向对齐都以底盘 IMU 的 yaw 为基准；
+     * IMU 数据无效时没有基准，按停止处理，数据恢复后自动继续。 */
+    if (!feedback->imu_valid && behavior != CHASSIS_BEHAVIOR_DIRECT && behavior != CHASSIS_BEHAVIOR_GIMBAL_FOLLOW)
+    {
+        behavior = CHASSIS_BEHAVIOR_STOP;
     }
 
     /* 小陀螺卡死换向：每周期都要更新，且必须在行为确定之后、行为表用小陀螺方向之前。 */
     update_spin_watchdog(behavior, feedback);
 
-    /* 行为表：每个行为写全 vx、vy、wz。平移请求在云台坐标系的行为按云台相对底盘的 yaw 角转到底盘坐标系。 */
+    /* 行为表：每个行为写全 vx、vy、wz。平移请求在上电世界系的行为按底盘 IMU 的实时 yaw 转到底盘坐标系，
+     * 跟随云台的平移请求在云台坐标系，按云台相对底盘的 yaw 角转到底盘坐标系；两种换算的旋转方向相反。 */
     switch (behavior)
     {
     case CHASSIS_BEHAVIOR_STOP:
@@ -400,13 +408,24 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
         break;
     }
 
+    case CHASSIS_BEHAVIOR_TRANSLATE:
+    {
+        /* 只平移：平移请求在上电世界系；自转为零。 */
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
+        target->wz = 0.0f;
+        break;
+    }
+
     case CHASSIS_BEHAVIOR_SPIN_SLOW:
     {
-        /* 慢速小陀螺：平移请求在云台坐标系；自转为固定角速度，方向取卡死换向维护的小陀螺方向。 */
-        const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
-        const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
-        target->vx = cos_yaw * request.vx - sin_yaw * request.vy;
-        target->vy = sin_yaw * request.vx + cos_yaw * request.vy;
+        /* 慢速小陀螺：平移请求在上电世界系；自转为固定角速度，方向取卡死换向维护的小陀螺方向。 */
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
         target->wz = CHASSIS_SPIN_SLOW_RATIO * (spin_forward ? CHASSIS_MAX_ANGULAR_RAD_S : -CHASSIS_MAX_ANGULAR_RAD_S);
         break;
     }
@@ -414,17 +433,55 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
     case CHASSIS_BEHAVIOR_SPIN_FAST:
     {
         /* 快速小陀螺：同慢速小陀螺，只是自转比例不同。 */
-        const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
-        const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
-        target->vx = cos_yaw * request.vx - sin_yaw * request.vy;
-        target->vy = sin_yaw * request.vx + cos_yaw * request.vy;
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
         target->wz = CHASSIS_SPIN_FAST_RATIO * (spin_forward ? CHASSIS_MAX_ANGULAR_RAD_S : -CHASSIS_MAX_ANGULAR_RAD_S);
+        break;
+    }
+
+    case CHASSIS_BEHAVIOR_ALIGNMENT:
+    {
+        /* 四面对齐：平移请求在上电世界系；自转由角度环把底盘 x、y 轴中离平移方向最近的一条转向平移方向。 */
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
+        /* 平移方向到底盘 x 轴、y 轴的有符号夹角，取绝对值较小者；无平移时两者均为 0，不自转。 */
+        const float angle_x = atan2f(-target->vx * target->vy, target->vx * target->vx);
+        const float angle_y = atan2f(target->vx * target->vy, target->vy * target->vy);
+        target->wz = pid_calculator_update(&follow_pid, -(fabsf(angle_x) < fabsf(angle_y) ? angle_x : angle_y));
+        break;
+    }
+
+    case CHASSIS_BEHAVIOR_STEP_DOWN:
+    {
+        /* 两面对齐：平移请求在上电世界系；自转由角度环让底盘正前方或正后方中较近的一面转向目标朝向，
+         * 角误差按 π 周期折算到 -π/2～π/2。 */
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
+        target->wz = pid_calculator_update(&follow_pid, remainderf(request.target_yaw - feedback->chassis_yaw, TWO_PI / 2.0f));
+        break;
+    }
+
+    case CHASSIS_BEHAVIOR_LAUNCH_RAMP:
+    {
+        /* 单面对齐：平移请求在上电世界系；自转由角度环让底盘正前方转向目标朝向，
+         * 角误差按 2π 周期折算到 -π～π。 */
+        const float cos_yaw = cosf(feedback->chassis_yaw);
+        const float sin_yaw = sinf(feedback->chassis_yaw);
+        target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
+        target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
+        target->wz = pid_calculator_update(&follow_pid, remainderf(request.target_yaw - feedback->chassis_yaw, TWO_PI));
         break;
     }
 
     case CHASSIS_BEHAVIOR_GIMBAL_FOLLOW:
     {
-        /* 跟随云台：平移请求在云台坐标系；自转由角度环跟随云台朝向。 */
+        /* 跟随云台：平移请求在云台坐标系；自转由角度环让底盘正前方跟随云台朝向。 */
         const float cos_yaw = cosf(feedback->gimbal_yaw_angle);
         const float sin_yaw = sinf(feedback->gimbal_yaw_angle);
         /* 底盘相对云台目标朝向的无符号角误差，范围 0～2π。 */
@@ -452,10 +509,11 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
 
     case CHASSIS_BEHAVIOR_CLIMB:
     {
-        /* 爬坡：平移请求已在底盘坐标系，直接采用；自转由角度环跟随爬坡朝向，角误差折算到 -π～π。 */
+        /* 爬坡：平移请求已在底盘坐标系，直接采用；自转由角度环让底盘正前方转向爬坡朝向，
+         * 角误差按 2π 周期折算到 -π～π。 */
         target->vx = request.vx;
         target->vy = request.vy;
-        target->wz = pid_calculator_update(&follow_pid, remainderf(request.climb_yaw_error, TWO_PI));
+        target->wz = pid_calculator_update(&follow_pid, remainderf(request.target_yaw - feedback->chassis_yaw, TWO_PI));
         break;
     }
     }

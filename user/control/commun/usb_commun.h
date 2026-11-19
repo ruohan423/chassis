@@ -8,6 +8,7 @@
 
 #define USB_SEND_MIN_INTERVAL_MS  2U   /* USB 成功提交包之间的最小间隔，单位 ms。 */
 #define USB_STATE_SEND_INTERVAL_MS 10U /* 底盘状态帧发送间隔，单位 ms。 */
+#define USB_CHASSIS_BEHAVIOR_MAX   9U  /* 控制帧 chassis_behavior 的最大合法编号，须等于 chassis_behavior_t 的最后一项；超出的帧按无效帧丢弃。 */
 
 /* 底盘 yaw 单位 rad、yaw 角速度单位 rad/s*/
 extern volatile float usb_chassis_yaw_rad;
@@ -17,19 +18,21 @@ void usb_commun_update_imu(float yaw_rad, float yaw_rate_rad_s);
 
 void usb_send_update(uint32_t now_tick);
 
-/* 上位机下发的控制帧，共 40 字节，小端：data 起始偏移 8，chassis_spin 偏移 20，pitch_cmd 偏移 21，
- * gimabal_model 偏移 22，gimabal_tar_angle 偏移 24，gimabal_pat_angle 偏移 28，activate_energy 偏移 32，eof 偏移 36；
- * 偏移 23、33～35、37～39 为对齐填充，不校验。底盘字段由 Chassis_Task 读取，云台字段经 CAN 转发给云台板。 */
+/* 上位机下发的控制帧，共 44 字节，小端：data 起始偏移 8，target_yaw 偏移 20，chassis_behavior 偏移 24，pitch_cmd 偏移 25，
+ * gimabal_model 偏移 26，gimabal_tar_angle 偏移 28，gimabal_pat_angle 偏移 32，activate_energy 偏移 36，eof 偏移 40；
+ * 偏移 27、37～39、41～43 为对齐填充，不校验。底盘字段由 Chassis_Task 读取，云台字段经 CAN 转发给云台板。
+ * 上电世界系：底盘姿态解算启动时刻的底盘坐标系，此后固定不动；状态帧的 chassis_yaw 即底盘在该系中的朝向。 */
 typedef struct
 {
     uint32_t frame_header; //0x1002
     uint32_t frame_timestamp;
     struct
     {
-        float x;                    //x 轴速度，向前为正，单位 m/s
-        float y;                    //y 轴速度，向左为正，单位 m/s
-        float w;                    // 底盘 yaw 角速度，逆时针为正，单位 rad/s
-        bool chassis_spin;          //0不开小陀螺，1 为小陀螺 SPIN_FAST
+        float x;                    //x 轴速度，向前为正，单位 m/s；直控时在底盘坐标系，跟随云台时在云台坐标系，其余行为在上电世界系
+        float y;                    //y 轴速度，向左为正，单位 m/s；坐标系同 x
+        float w;                    // 底盘 yaw 角速度，逆时针为正，单位 rad/s；仅直控采用
+        float target_yaw;           // 底盘目标朝向，上电世界系，与状态帧 chassis_yaw 同一基准，单位 rad；仅两面对齐、单面对齐采用
+        uint8_t chassis_behavior;   // 底盘行为编号，同 chassis_behavior_t：0 停止，1 直控，2 只平移，3 慢速小陀螺，4 快速小陀螺，5 四面对齐，6 两面对齐，7 单面对齐，8 跟随云台，9 爬坡（爬坡输入无效时按直控）
         bool pitch_cmd;             //0升起云台，1降低云台
         uint8_t gimabal_model;      //0 跟随底盘，1 固定目标角，2 目标角巡逻。
         float gimabal_tar_angle;    // 云台目标角度，单位 rad。
@@ -60,7 +63,7 @@ typedef struct
     uint32_t frame_timestamp;
     struct
     {
-        float chassis_yaw; /* 底盘当前 yaw，单位 rad。 */
+        float chassis_yaw; /* 底盘 IMU 的实时 yaw，即底盘在上电世界系中的朝向，逆时针为正，范围 -π～π，单位 rad。 */
         float chassis_wz;  /* 底盘当前 yaw 角速度，单位 rad/s。 */
         bool pitch_status;//小云台当前状态，0升起状态，1降低云台
         bool energy_mechanis_done; //是否完成开符动作，0未完成1完成，仅指当前开符动作有没有结束，不代表有没有开符成功

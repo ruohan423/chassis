@@ -14,7 +14,6 @@ static gimbal_data_t gimbal_data;
 static uint8_t remote_data[CAN_COMMUN_REMOTE_LENGTH];
 static bool remote_pending;
 static float imu_yaw_rad;
-static float imu_yaw_rate_rad_s;
 static uint8_t imu_data[CAN_COMMUN_IMU_LENGTH];
 static bool imu_pending;
 static gimbal_active_t gimbal_active;
@@ -29,13 +28,10 @@ static void can_commun_on_receive(CAN_HandleTypeDef *handle, const user_can_fram
     }
 
     int16_t yaw_angle;
-    int16_t yaw_rate;
     memcpy(&yaw_angle, &frame->data[0], sizeof(yaw_angle));
-    memcpy(&yaw_rate, &frame->data[2], sizeof(yaw_rate));
     const uint32_t tick = HAL_GetTick();
     const UBaseType_t saved_mask = taskENTER_CRITICAL_FROM_ISR();
     gimbal_data.yaw_angle_rad = (float)yaw_angle * CAN_COMMUN_ANGLE_LSB_RAD;
-    gimbal_data.yaw_rate_rad_s = (float)yaw_rate * CAN_COMMUN_RATE_LSB_RAD_S;
     gimbal_data.pitch_status = (frame->data[4] & 0x01U) != 0U;
     gimbal_data.energy_mechanis_done = (frame->data[4] & 0x02U) != 0U;
     gimbal_data.tick = tick;
@@ -60,7 +56,7 @@ bool can_commun_read_gimbal_data(gimbal_data_t *data)
     return data->online;
 }
 
-void can_commun_update_imu(float yaw_rad, float yaw_rate_rad_s)
+void can_commun_update_imu(float yaw_rad)
 {
     const int32_t previous_lock = osKernelLock();
     if (previous_lock < 0)
@@ -69,7 +65,6 @@ void can_commun_update_imu(float yaw_rad, float yaw_rate_rad_s)
     }
 
     imu_yaw_rad = yaw_rad;
-    imu_yaw_rate_rad_s = yaw_rate_rad_s;
     if (previous_lock == 0)
     {
         (void)osKernelRestoreLock(previous_lock);
@@ -142,17 +137,14 @@ void can_commun_send_imu(void)
         }
 
         const float yaw_rad = imu_yaw_rad;
-        const float yaw_rate_rad_s = imu_yaw_rate_rad_s;
         if (previous_lock == 0)
         {
             (void)osKernelRestoreLock(previous_lock);
         }
 
-        /* yaw 来自欧拉角，本身在 -π～π 内；角速度按陀螺仪量程可能超出 int16 表示范围，需饱和。 */
+        /* yaw 来自欧拉角，本身在 -π～π 内，不会超出 int16 表示范围。 */
         const int16_t yaw = (int16_t)lroundf(yaw_rad / CAN_COMMUN_ANGLE_LSB_RAD);
-        const int16_t yaw_rate = (int16_t)lroundf(fmaxf(-32767.0f, fminf(yaw_rate_rad_s / CAN_COMMUN_RATE_LSB_RAD_S, 32767.0f)));
         memcpy(&imu_data[0], &yaw, sizeof(yaw));
-        memcpy(&imu_data[2], &yaw_rate, sizeof(yaw_rate));
         imu_pending = true;
     }
 

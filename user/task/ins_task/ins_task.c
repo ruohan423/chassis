@@ -101,7 +101,7 @@ void INS_Task(void *argument)
             (void)osKernelRestoreLock(previous_lock);
         }
         usb_commun_update_imu(yaw_rad, gyro_z);
-        can_commun_update_imu(yaw_rad, gyro_z);
+        can_commun_update_imu(yaw_rad);
 
         next_tick += 1U;
         osDelayUntil(next_tick);

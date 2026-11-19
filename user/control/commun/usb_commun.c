@@ -25,12 +25,13 @@ typedef struct __attribute__((packed))
 _Static_assert(sizeof(float) == 4U && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "USB 协议要求小端 32 位浮点数");
 _Static_assert(sizeof(bool) == 1U, "USB 协议要求 bool 占 1 字节");
 _Static_assert(offsetof(receive_cmd_t, data) == 8U, "USB 控制帧数据偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.chassis_spin) == 20U, "USB 小陀螺字段偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.pitch_cmd) == 21U, "USB 小云台升降字段偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.gimabal_model) == 22U, "USB 云台模式字段偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.gimabal_tar_angle) == 24U, "USB 云台目标角字段偏移不匹配");
-_Static_assert(offsetof(receive_cmd_t, data.activate_energy) == 32U, "USB 能量机关字段偏移不匹配");
-_Static_assert(sizeof(receive_cmd_t) == 40U, "USB 控制帧大小不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.target_yaw) == 20U, "USB 底盘目标朝向字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.chassis_behavior) == 24U, "USB 底盘行为字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.pitch_cmd) == 25U, "USB 小云台升降字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.gimabal_model) == 26U, "USB 云台模式字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.gimabal_tar_angle) == 28U, "USB 云台目标角字段偏移不匹配");
+_Static_assert(offsetof(receive_cmd_t, data.activate_energy) == 36U, "USB 能量机关字段偏移不匹配");
+_Static_assert(sizeof(receive_cmd_t) == 44U, "USB 控制帧大小不匹配");
 _Static_assert(offsetof(receive_sentry_t, data) == 8U, "USB 哨兵指令帧数据偏移不匹配");
 _Static_assert(offsetof(receive_sentry_t, eof) == 12U, "USB 哨兵指令帧尾偏移不匹配");
 _Static_assert(sizeof(receive_sentry_t) == 16U, "USB 哨兵指令帧大小不匹配");
@@ -381,7 +382,7 @@ void usb_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
                 }
                 const bool valid = frame_header == USB_CONTROL_FRAME_HEADER
                     ? (receive_frame[offsetof(receive_cmd_t, eof)] == 0xA5U
-                       && receive_frame[offsetof(receive_cmd_t, data.chassis_spin)] <= 1U
+                       && receive_frame[offsetof(receive_cmd_t, data.chassis_behavior)] <= USB_CHASSIS_BEHAVIOR_MAX
                        && receive_frame[offsetof(receive_cmd_t, data.pitch_cmd)] <= 1U
                        && receive_frame[offsetof(receive_cmd_t, data.gimabal_model)] <= 2U
                        && receive_frame[offsetof(receive_cmd_t, data.activate_energy)] <= 1U)

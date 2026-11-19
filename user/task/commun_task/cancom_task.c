@@ -8,7 +8,7 @@
 #include "can_commun.h"
 
 #define CANCOM_SEND_PERIOD_MS   10U  /* 底盘姿态帧与云台指令帧的发送周期，单位 ms。 */
-#define CANCOM_RETRY_PERIOD_MS 100U  /* CAN 启动失败后的重试间隔，单位 ms。 */
+#define CANCOM_RETRY_PERIOD_MS 100U  /* CAN 总线状态检查间隔，也是启动失败或 bus-off 后的重启间隔，单位 ms。 */
 
 static osThreadId_t cancom_task_id;
 
@@ -30,7 +30,8 @@ void CanCom_Task(void *argument)
         const uint32_t flags = osThreadFlagsWait(CANCOM_TASK_REMOTE_FRAME_FLAG, osFlagsWaitAny, wait_ticks);
 
         now_tick = osKernelGetTickCount();
-        if (!can_started && (int32_t)(now_tick - next_retry_tick) >= 0)
+        /* 按检查间隔调用 can_commun_init：总线可用时直接返回，未启动或处于 bus-off 时重启总线。 */
+        if ((int32_t)(now_tick - next_retry_tick) >= 0)
         {
             can_started = can_commun_init();
             next_retry_tick += CANCOM_RETRY_PERIOD_MS;

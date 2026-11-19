@@ -72,7 +72,9 @@ bool chassis_port_send(float charge_limit_w)
             float_constrain(output * motor_directions[i], -CHASSIS_MOTOR_OUTPUT_LIMIT, CHASSIS_MOTOR_OUTPUT_LIMIT));
     }
 
-    return MotorSend(CHASSIS_CAN_HANDLE, CHASSIS_MOTOR_COMMAND_ID, commands) == HAL_OK;
+    /* bus-off 期间控制器不收不发，按发送失败上报，任务延时后经 chassis_port_init 重启总线。 */
+    return user_can_is_online(CHASSIS_CAN_HANDLE)
+        && MotorSend(CHASSIS_CAN_HANDLE, CHASSIS_MOTOR_COMMAND_ID, commands) == HAL_OK;
 }
 
 bool chassis_motor_is_online(const chassis_motor_t *motor)
@@ -107,7 +109,8 @@ void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback)
     feedback->supercap_enabled = supercap->online && supercap->enabled;
     feedback->chassis_power_w = supercap->chassis_power_w;
     feedback->supercap_voltage_v = supercap->supercap_voltage_v;
-    feedback->yaw_rate_valid = usb_chassis_imu_valid;
+    feedback->imu_valid = usb_chassis_imu_valid;
+    feedback->chassis_yaw = usb_chassis_yaw_rad;
     feedback->yaw_rate_rad_s = usb_chassis_wz_rad_s;
     feedback->gimbal_online = gimbal_online;
     if (gimbal_online)
@@ -117,7 +120,6 @@ void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback)
         {
             feedback->gimbal_yaw_angle += TWO_PI;
         }
-        feedback->gimbal_yaw_rate_rad_s = gimbal.yaw_rate_rad_s;
     }
 
     if (lock_state == 0)

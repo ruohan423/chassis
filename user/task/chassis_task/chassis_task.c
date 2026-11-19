@@ -14,7 +14,9 @@
 
 #define CHASSIS_TASK_PERIOD_MS     2U    /* 底盘控制周期，单位 ms；PID 按该周期累加，修改后须重新换算 ki、kd，并同时用于功率预算积分。 */
 #define CHASSIS_START_RETRY_MS     100U  /* 总线初始化或发送失败后的重试间隔，单位 ms。 */
-#define CHASSIS_COMMAND_TIMEOUT_MS 200U  /* 上位机控制帧链路超时，单位 ms；超时后导航速度和小陀螺请求清零，全自动档位下速度目标归零。 */
+#define CHASSIS_COMMAND_TIMEOUT_MS 200U  /* 上位机控制帧链路超时，单位 ms；超时后导航速度、目标朝向和行为请求复位，全自动档位下速度目标归零。 */
+
+_Static_assert(USB_CHASSIS_BEHAVIOR_MAX == CHASSIS_BEHAVIOR_CLIMB, "USB 控制帧行为编号上限须等于 chassis_behavior_t 的最后一项");
 
 void Chassis_Task(void *argument)
 {
@@ -25,12 +27,11 @@ void Chassis_Task(void *argument)
     const uint32_t retry_ticks = (tick_freq * CHASSIS_START_RETRY_MS + 999U) / 1000U;
     const uint32_t command_timeout_ticks = (tick_freq * CHASSIS_COMMAND_TIMEOUT_MS + 999U) / 1000U;
     const float period_s = (float)period_ticks / (float)tick_freq;
-    /* 爬坡控制器未接入，三个爬坡输入保持 NAN 表示未激活；上位机协议暂无 boost 字段，boost 保持为假。 */
+    /* 爬坡控制器未接入，两个爬坡输入保持 NAN 表示未激活；上位机协议暂无 boost 字段，boost 保持为假。 */
     static chassis_command_t command = {
         .nav_behavior = CHASSIS_BEHAVIOR_DIRECT,
         .climb_direction = NAN,
         .climb_speed = NAN,
-        .climb_yaw = NAN,
     };
     static receive_cmd_t usb_command;
     uint32_t last_command_tick = 0U;
@@ -49,23 +50,25 @@ void Chassis_Task(void *argument)
 
         const uint32_t tick = osKernelGetTickCount();
         /* 上位机数据为外部输入，非有限值的帧不采用，也不刷新链路时间。 */
-        if (usb_read_command(&usb_command) && isfinite(usb_command.data.x)
-            && isfinite(usb_command.data.y) && isfinite(usb_command.data.w))
+        if (usb_read_command(&usb_command) && isfinite(usb_command.data.x) && isfinite(usb_command.data.y)
+            && isfinite(usb_command.data.w) && isfinite(usb_command.data.target_yaw))
         {
             command.nav_vx = usb_command.data.x;
             command.nav_vy = usb_command.data.y;
             command.nav_wz = usb_command.data.w;
-            /* 当前协议只有小陀螺开关：0 为直控，1 为快速小陀螺；仅遥控器选中全自动时由控制层采用。 */
-            command.nav_behavior = usb_command.data.chassis_spin ? CHASSIS_BEHAVIOR_SPIN_FAST : CHASSIS_BEHAVIOR_DIRECT;
+            command.nav_target_yaw = usb_command.data.target_yaw;
+            /* 行为编号已由 USB 接收按 USB_CHASSIS_BEHAVIOR_MAX 校验，取值与 chassis_behavior_t 一一对应；仅遥控器选中全自动时由控制层采用。 */
+            command.nav_behavior = (chassis_behavior_t)usb_command.data.chassis_behavior;
             command.nav_online = true;
             last_command_tick = tick;
         }
         if (command.nav_online && tick - last_command_tick >= command_timeout_ticks)
         {
-            /* 链路超时：导航速度和小陀螺请求清零，全自动档位下速度目标归零。 */
+            /* 链路超时：导航速度和目标朝向清零，行为请求回到直控，全自动档位下速度目标归零。 */
             command.nav_vx = 0.0f;
             command.nav_vy = 0.0f;
             command.nav_wz = 0.0f;
+            command.nav_target_yaw = 0.0f;
             command.nav_behavior = CHASSIS_BEHAVIOR_DIRECT;
             command.boost = false;
             command.nav_online = false;

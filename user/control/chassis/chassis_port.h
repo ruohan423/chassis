@@ -34,15 +34,15 @@ typedef struct
     float buffer_energy_j;        /* 裁判缓冲能量 J，referee_online 为真时有效 */
     float chassis_power_w;        /* 电容实测底盘功率 W，supercap_online 为真时有效 */
     float supercap_voltage_v;     /* 电容组电压 V，supercap_online 为真时有效 */
-    float yaw_rate_rad_s;         /* 底盘 IMU 的 yaw 角速度 rad/s，yaw_rate_valid 为真时有效 */
+    float chassis_yaw;            /* 底盘 IMU 的实时 yaw 角 rad，姿态解算启动时为 0、俯视逆时针为正，范围 -π～π；即底盘在上电世界系中的朝向，imu_valid 为真时有效 */
+    float yaw_rate_rad_s;         /* 底盘 IMU 的 yaw 角速度 rad/s，imu_valid 为真时有效 */
     float gimbal_yaw_angle;       /* 云台相对底盘的 yaw 角 rad，范围 0～2π；云台在线时有效 */
-    float gimbal_yaw_rate_rad_s;  /* 云台 yaw 角速度 rad/s；云台在线时有效 */
     float gimbal_yaw_target_offset_rad; /* 云台目标角相对实测角的偏移量 rad，正方向同相对角；来源未接入，当前为 0 */
     bool referee_online;          /* 机器人性能与功率热量数据均未超时 */
     bool supercap_online;         /* 电容在线，实测功率和电压可信 */
     bool supercap_enabled;        /* 电容允许放电，离线时为假 */
-    bool yaw_rate_valid;          /* 姿态解算已开始发布角速度 */
-    bool gimbal_online;           /* 云台角度与角速度反馈未超时且数值有效 */
+    bool imu_valid;               /* 姿态解算已开始发布 yaw 角和角速度，两者同一次发布、共用该标志 */
+    bool gimbal_online;           /* 云台角度反馈未超时 */
 } chassis_feedback_t;
 
 /* 仅任务上下文调用；feedback 为调用方输出对象，仅在调用期间写入且不保存指针。
