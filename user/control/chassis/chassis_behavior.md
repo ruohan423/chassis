@@ -38,18 +38,18 @@ vy_底盘 = sin(gimbal_yaw_angle)·vx_云台 + cos(gimbal_yaw_angle)·vy_云台
 
 编号即 `chassis_behavior_t` 的枚举值，也是上位机控制帧 `chassis_behavior` 字段的取值。
 
-| 编号 | 行为 | 平移坐标系 | 自转 | 用到的请求 | 对应 RMCS |
+| 编号 | 行为 | 平移坐标系 | 自转 | 用到的请求 | 运动特点 |
 |---|---|---|---|---|---|
-| 0 | `STOP` | — | 0 | — | — |
-| 1 | `DIRECT` | 底盘系 | 直接取请求的 wz | vx、vy、wz | — |
-| 2 | `TRANSLATE` | 世界系 | 0 | vx、vy | `AUTO` |
-| 3 | `SPIN_SLOW` | 世界系 | 固定 0.3 × 角速度上限 | vx、vy | `SPIN_SLOW` |
-| 4 | `SPIN_FAST` | 世界系 | 固定 0.6 × 角速度上限 | vx、vy | `SPIN_FAST` |
-| 5 | `ALIGNMENT` | 世界系 | 最近的底盘 x 或 y 轴对齐平移方向 | vx、vy | `ALIGNMENT` / `ALIGNMENT_POWERED` |
-| 6 | `STEP_DOWN` | 世界系 | 底盘正前或正后（取最近）对齐 `target_yaw` | vx、vy、target_yaw | `STEP_DOWN` |
-| 7 | `LAUNCH_RAMP` | 世界系 | 底盘正前方对齐 `target_yaw` | vx、vy、target_yaw | `LAUNCH_RAMP` |
-| 8 | `GIMBAL_FOLLOW` | **云台系** | 底盘正前方对齐云台 | vx、vy | — |
-| 9 | `CLIMB` | 底盘系（只沿 x） | 底盘正前方对齐爬坡朝向（世界系） | 爬坡输入 | `CLIMB` |
+| 0 | `STOP` | — | 0 | — | 原地不动 |
+| 1 | `DIRECT` | 底盘系 | 直接取请求的 wz | vx、vy、wz | 给什么走什么，相对车头 |
+| 2 | `TRANSLATE` | 世界系 | 0 | vx、vy | 只平移，车头不转 |
+| 3 | `SPIN_SLOW` | 世界系 | 固定 0.3 × 角速度上限 | vx、vy | 慢转，同时走直线 |
+| 4 | `SPIN_FAST` | 世界系 | 固定 0.6 × 角速度上限 | vx、vy | 快转，同时走直线 |
+| 5 | `ALIGNMENT` | 世界系 | 最近的底盘 x 或 y 轴对齐平移方向 | vx、vy | 最近的一个侧面正对行进方向，最多转 45° |
+| 6 | `STEP_DOWN` | 世界系 | 底盘正前或正后（取最近）对齐 `target_yaw` | vx、vy、target_yaw | 车头或车尾对准目标朝向，不掉头，最多转 90° |
+| 7 | `LAUNCH_RAMP` | 世界系 | 底盘正前方对齐 `target_yaw` | vx、vy、target_yaw | 车头对准目标朝向 |
+| 8 | `GIMBAL_FOLLOW` | **云台系** | 底盘正前方对齐云台 | vx、vy | 车头跟着云台转，相对云台走 |
+| 9 | `CLIMB` | 底盘系（只沿 x） | 底盘正前方对齐爬坡朝向（世界系） | 爬坡输入 | 车头对准台阶，只前进或倒车 |
 
 公共参数（`chassis_config.h`）：平移合速度上限 2.2 m/s，角速度上限 8 rad/s，角度环 kp = 7，输出限幅到角速度上限。
 除 `CLIMB` 外，平移合速度超过上限时两轴等比例缩小。
