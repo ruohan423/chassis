@@ -91,10 +91,10 @@
 #define CHASSIS_POWER_NO_LOAD_W 2.7f          /* 整车空载功率，单位 W；模型中计入可用功率，待本车辨识 */
 
 /* 功率预算：虚拟缓冲能量按 (期望上限 - 实测功率) 积分，并受裁判缓冲能量限制。
- * 实测功率来自超级电容；电容离线时不积分，仅按裁判缓冲能量折减。 */
+ * 实测功率来自超级电容；电容离线时不积分，虚拟缓冲回上限并跟随裁判缓冲能量。 */
 #define CHASSIS_POWER_BUFFER_LIMIT_J  30.0f  /* 虚拟缓冲能量上限，单位 J */
 #define CHASSIS_POWER_EXCESS_W        15.0f  /* 缓冲满时允许超出功率上限的功率，单位 W */
-#define CHASSIS_POWER_BOOST_EXCESS_W  80.0f  /* boost 允许超出裁判上限的功率，单位 W */
+#define CHASSIS_POWER_BOOST_EXCESS_W  50.0f  /* boost 允许超出裁判上限的功率，单位 W；沿用旧工程 +50 W */
 #define CHASSIS_POWER_OFFLINE_LIMIT_W 85.0f  /* 裁判离线时受功率约束模式的固定功率上限，单位 W；沿用原工程哨兵 100 W × 0.85，须按规则核对 */
 
 /* 不限功率模式（遥控器 s2=1）的硬件保护：不看裁判功率上限和缓冲能量，只保护电源、电调和电机。
@@ -104,13 +104,10 @@
 #define CHASSIS_MOTOR_TEMP_DERATE_START_C 80.0f   /* 最热电机的反馈温度高于该值后线性压低单轮电流上限，单位 ℃；待按 M3508 手册和实测温升核对 */
 #define CHASSIS_MOTOR_TEMP_CUTOFF_C       100.0f  /* 最热电机的反馈温度达到该值时单轮电流上限降为零，单位 ℃，须大于起始值；待核对 */
 
-/* 超级电容分档沿用 RMCS ChassisPowerController；电压阈值须按实车电容组核对，能量阈值须按当年规则核对。
- * boost 功率随电压线性放开，充电功率随裁判缓冲能量分两段放开；电容离线时 boost 不生效。 */
-#define CHASSIS_SUPERCAP_BOOST_START_V    12.0f   /* boost 额外功率关闭阈值，单位 V */
-#define CHASSIS_SUPERCAP_BOOST_FULL_V     12.5f   /* boost 额外功率全开阈值，单位 V，须大于启动阈值 */
-#define CHASSIS_SUPERCAP_CHARGE_STOP_J    0.0f    /* 充电功率降为零的缓冲能量，单位 J */
-#define CHASSIS_SUPERCAP_CHARGE_BASE_J    30.0f   /* 充电功率达到裁判上限的缓冲能量，单位 J，须大于停止阈值 */
-#define CHASSIS_SUPERCAP_CHARGE_FULL_J    120.0f  /* 额外充电功率全开的缓冲能量，单位 J，须大于基础阈值 */
-#define CHASSIS_SUPERCAP_CHARGE_EXCESS_W  35.0f   /* 缓冲充足时允许超出裁判上限的充电功率，单位 W */
+/* 超级电容放电：额外功率随电容电量在起始与全开阈值之间线性放开，电量不足时回落为裁判上限；电容离线或报错时不放电。
+ * 电量阈值为原始 0～255 值，单位与量程须按实车电容板手册核对；起始阈值沿用旧工程 9，全开阈值暂取满量程。 */
+#define CHASSIS_SUPERCAP_BOOST_START_ENERGY 9U    /* boost 额外功率关闭电量阈值，原始 0～255，待核对 */
+#define CHASSIS_SUPERCAP_BOOST_FULL_ENERGY  255U  /* boost 额外功率全开电量阈值，须大于起始阈值，待核对 */
+#define CHASSIS_SUPERCAP_SEND_PERIOD_MS     30U   /* 电容指令转发周期，单位 ms，沿用旧工程 */
 
 #endif

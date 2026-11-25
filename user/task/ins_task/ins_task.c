@@ -1,4 +1,4 @@
-/* CubeMX 创建说明：保留或由用户创建姿态常驻线程。
+/* CubeMX _创建说明：保留或由用户创建姿态常驻线程。
  * 名称 ins_task，入口 INS_Task，优先级 osPriorityNormal，栈 2048 字节。
  * 若界面以 32 位字填写栈大小，填 512；当前采样任务要求内核时钟为 1000 Hz。
  * CAL_ON_STARTUP 非零时，还需按 calib_task.c 说明创建校准线程。
@@ -10,6 +10,7 @@
 #include "ins_task.h"
 #include "can_commun.h"
 #include "usb_commun.h"
+#include "uart_commun.h"
 
 #include <math.h>
 #include <stdint.h>
@@ -101,6 +102,7 @@ void INS_Task(void *argument)
             (void)osKernelRestoreLock(previous_lock);
         }
         usb_commun_update_imu(yaw_rad, gyro_z);
+        uart_commun_update_imu(yaw_rad, gyro_z);
         can_commun_update_imu(yaw_rad);
 
         next_tick += 1U;

@@ -127,10 +127,25 @@ HAL_StatusTypeDef user_can_send(CAN_HandleTypeDef *handle, uint32_t standard_id,
     if (handle == NULL || data == NULL || standard_id > 0x7FFU || length > USER_CAN_DATA_LENGTH){return HAL_ERROR;}
     /* bus-off 期间不入邮箱，避免旧帧滞留到总线恢复后才发出。 */
     if (!user_can_is_online(handle)){return HAL_ERROR;}
-    if (HAL_CAN_GetTxMailboxesFreeLevel(handle) == 0U){return HAL_BUSY;}
 
-    memcpy(payload, data, length);
-    return HAL_CAN_AddTxMessage(handle, &header, payload, &mailbox);
+    /* CAN1 现在由通信任务和底盘任务两个任务发送，调度锁串行化邮箱检查和提交，避免两个任务抢占同一个空闲邮箱。 */
+    const int32_t previous_lock = osKernelLock();
+    if (previous_lock < 0){return HAL_ERROR;}
+    HAL_StatusTypeDef status;
+    if (HAL_CAN_GetTxMailboxesFreeLevel(handle) == 0U)
+    {
+        status = HAL_BUSY;
+    }
+    else
+    {
+        memcpy(payload, data, length);
+        status = HAL_CAN_AddTxMessage(handle, &header, payload, &mailbox);
+    }
+    if (previous_lock == 0)
+    {
+        (void)osKernelRestoreLock(previous_lock);
+    }
+    return status;
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *handle)

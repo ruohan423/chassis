@@ -91,6 +91,14 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
         }
         (void)osSemaphoreRelease(JudgeSemHandle);
     }
+    else if (huart == host_uart_rx.handle)
+    {
+        if (HAL_UARTEx_GetRxEventType(huart) == HAL_UART_RXEVENT_TC)
+        {
+            host_uart_rx.wrap_count++;
+        }
+        (void)osSemaphoreRelease(UartComSemHandle);
+    }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
@@ -104,5 +112,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
         judge_uart_rx.error_pending = true;
         (void)osSemaphoreRelease(JudgeSemHandle);
+    }
+    else if (huart == host_uart_rx.handle)
+    {
+        host_uart_rx.error_pending = true;
+        (void)osSemaphoreRelease(UartComSemHandle);
     }
 }

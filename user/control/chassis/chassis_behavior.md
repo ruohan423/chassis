@@ -42,7 +42,7 @@ vy_底盘 = sin(gimbal_yaw_angle)·vx_云台 + cos(gimbal_yaw_angle)·vy_云台
 |---|---|---|---|---|---|
 | 0 | `STOP` | — | 0 | — | 原地不动 |
 | 1 | `DIRECT` | 底盘系 | 直接取请求的 wz | vx、vy、wz | 给什么走什么，相对车头 |
-| 2 | `TRANSLATE` | 世界系 | 0 | vx、vy | 只平移，车头不转 |
+| 2 | `TRANSLATE` | 世界系 | 直接取请求的 wz | vx、vy、wz | 导航按世界系发 x、y、w，平移相对世界、转速照给 |
 | 3 | `SPIN_SLOW` | 世界系 | 固定 0.3 × 角速度上限 | vx、vy | 慢转，同时走直线 |
 | 4 | `SPIN_FAST` | 世界系 | 固定 0.6 × 角速度上限 | vx、vy | 快转，同时走直线 |
 | 5 | `ALIGNMENT` | 世界系 | 最近的底盘 x 或 y 轴对齐平移方向 | vx、vy | 最近的一个侧面正对行进方向，最多转 45° |
@@ -66,8 +66,10 @@ vy_底盘 = sin(gimbal_yaw_angle)·vx_云台 + cos(gimbal_yaw_angle)·vy_云台
 平移和自转请求都已在底盘系，直接作为速度目标；自转限幅到角速度上限。
 遥控器自由控制使用。不属于世界系行为，不做坐标换算。
 
-### TRANSLATE 只平移
-平移请求在世界系，转到底盘系；自转为零，底盘朝向保持不动。
+### TRANSLATE 世界系直控
+导航以世界系下发 x、y、w 时使用。平移请求在世界系，每周期按当前 `chassis_yaw` 转到底盘系；
+自转直接取请求的 wz，限幅到角速度上限。wz 给 0 就是只平移、车头不转。
+与 `DIRECT` 的区别只在平移坐标系：`DIRECT` 相对车头，本行为相对世界，车体转动时行进方向不跟着变。
 
 ### SPIN_SLOW / SPIN_FAST 小陀螺
 平移请求在世界系，每周期按当前 `chassis_yaw` 转到底盘系，因此底盘旋转的同时在世界系里走直线。
@@ -127,7 +129,7 @@ s2=3 受功率上限约束，s2=1 不受功率上限约束、只保留硬件保�
 | 4 | `frame_timestamp` | uint32 | 时间戳 |
 | 8 | `x` | float | x 向速度 m/s，坐标系由行为决定（见第 2 节） |
 | 12 | `y` | float | y 向速度 m/s，坐标系同 `x` |
-| 16 | `w` | float | 自转角速度 rad/s，仅 `DIRECT` 采用 |
+| 16 | `w` | float | 自转角速度 rad/s，仅 `DIRECT`、`TRANSLATE` 采用 |
 | 20 | `target_yaw` | float | 世界系目标朝向 rad，仅 `STEP_DOWN`、`LAUNCH_RAMP` 采用 |
 | 24 | `chassis_behavior` | uint8 | 行为编号 0～9 |
 | 25 | `pitch_cmd` | bool | 云台字段，未变 |

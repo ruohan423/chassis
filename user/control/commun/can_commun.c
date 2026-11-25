@@ -4,6 +4,7 @@
 #include "cmsis_os2.h"
 #include "FreeRTOS.h"
 #include "remote.h"
+#include "super_capacitor.h"
 #include "task.h"
 #include "user_can.h"
 
@@ -22,7 +23,19 @@ static uint32_t gimbal_active_tick;
 static void can_commun_on_receive(CAN_HandleTypeDef *handle, const user_can_frame_t *frame)
 {
     (void)handle;
-    if (frame->extended || frame->id != CAN_COMMUN_GIMBAL_FEEDBACK_ID || frame->length != CAN_COMMUN_GIMBAL_FEEDBACK_LENGTH)
+    if (frame->extended)
+    {
+        return;
+    }
+
+    /* CAN1 板间总线还承载电容板状态帧，按帧标识分发给对应设备模块。 */
+    if (frame->id == SUPER_CAPACITOR_RX_ID && frame->length == SUPER_CAPACITOR_STATUS_LENGTH)
+    {
+        super_capacitor_update_status(frame->data);
+        return;
+    }
+
+    if (frame->id != CAN_COMMUN_GIMBAL_FEEDBACK_ID || frame->length != CAN_COMMUN_GIMBAL_FEEDBACK_LENGTH)
     {
         return;
     }

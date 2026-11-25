@@ -30,7 +30,7 @@ typedef struct
 {
     float vx;         /* x 向平移请求，向前为正，单位 m/s；直控和爬坡在底盘坐标系，跟随云台在云台坐标系，其余行为在上电世界系 */
     float vy;         /* y 向平移请求，向左为正，单位 m/s；坐标系同 vx */
-    float wz;         /* 自转请求，逆时针为正，单位 rad/s；仅直控采用 */
+    float wz;         /* 自转请求，逆时针为正，单位 rad/s；仅直控和世界系直控采用 */
     float target_yaw; /* 上电世界系下的目标朝向，单位 rad，与底盘 IMU 的 yaw 同一基准；仅两面对齐、单面对齐和爬坡采用 */
 } chassis_request_t;
 
@@ -42,6 +42,8 @@ static pid_calculator_t wz_pid;
 static pid_calculator_t wheel_pid[CHASSIS_MOTOR_COUNT];
 static pid_calculator_t follow_pid;
 static float control_period_s;
+static uint32_t supercap_send_interval_cycles; /* 电容指令转发间隔，换算成控制周期数 */
+static uint32_t supercap_send_cycle;           /* 距上次电容指令转发已过的控制周期数 */
 static float virtual_buffer_j;         /* 虚拟缓冲能量 J */
 static float expected_power_w;         /* 上一周期期望的功率上限 W，作为虚拟缓冲能量的积分基准 */
 static bool spin_forward = true;       /* 小陀螺方向，真为逆时针 */
@@ -59,6 +61,11 @@ static float update_power_limit(bool power_unlimited, bool boost, const chassis_
 bool chassis_init(float period_s)
 {
     control_period_s = period_s;
+    supercap_send_interval_cycles = (uint32_t)(CHASSIS_SUPERCAP_SEND_PERIOD_MS / (period_s * 1000.0f) + 0.5f);
+    if (supercap_send_interval_cycles < 1U)
+    {
+        supercap_send_interval_cycles = 1U;
+    }
     spin_stuck_confirm_cycles = (uint32_t)(CHASSIS_SPIN_STUCK_CONFIRM_S / period_s + 0.5f);
     spin_cooldown_reload_cycles = (uint32_t)(CHASSIS_SPIN_REVERSE_COOLDOWN_S / period_s + 0.5f);
     pid_calculator_init(&vx_pid, CHASSIS_TRANSLATION_KP, CHASSIS_TRANSLATION_KI, CHASSIS_TRANSLATION_KD);
@@ -103,24 +110,22 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
     }
     chassis_port_read_feedback(tick, &feedback);
 
-    /* 电容充电功率上限只由裁判功率上限和缓冲能量决定，与底盘是否使能无关，每周期更新：
-     * 缓冲能量低于基准线时按比例压低裁判上限，高于基准线后逐步放开额外充电功率。裁判离线时不充电。 */
-    float charge_limit_w = 0.0f;
-    if (feedback.referee_online)
+    /* 电容指令按转发间隔把裁判功率上限和缓冲能量交给电容板，充电由电容板自行闭环；
+     * 裁判离线时上限按 100 W、缓冲能量按 0 转发，电容板据此自行处置。 */
+    if (++supercap_send_cycle >= supercap_send_interval_cycles)
     {
-        charge_limit_w = feedback.power_limit_w
-            * float_constrain((feedback.buffer_energy_j - CHASSIS_SUPERCAP_CHARGE_STOP_J)
-                              / (CHASSIS_SUPERCAP_CHARGE_BASE_J - CHASSIS_SUPERCAP_CHARGE_STOP_J), 0.0f, 1.0f)
-            + CHASSIS_SUPERCAP_CHARGE_EXCESS_W
-            * float_constrain((feedback.buffer_energy_j - CHASSIS_SUPERCAP_CHARGE_BASE_J)
-                              / (CHASSIS_SUPERCAP_CHARGE_FULL_J - CHASSIS_SUPERCAP_CHARGE_BASE_J), 0.0f, 1.0f);
+        supercap_send_cycle = 0U;
+        chassis_port_send_supercap(
+            feedback.referee_online ? (uint16_t)feedback.power_limit_w : 100U,
+            feedback.referee_online ? (uint16_t)feedback.buffer_energy_j : 0U,
+            feedback.supercap_output_enabled);
     }
 
     /* 底盘速度由四轮共同解算，任一轮无反馈时估计失效，四轮一起停止。 */
     if (mode == CHASSIS_STOP || !motors_online)
     {
         reset_control();
-        return chassis_port_send(charge_limit_w);
+        return chassis_port_send();
     }
 
     /* 速度目标：模式、输入和反馈解算为底盘坐标系下的速度目标，模式表、卡死换向和行为表都在 resolve_target 里。 */
@@ -129,10 +134,12 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
     {
         /* 目标无效时与停止态同样处理，对应 RMCS 对 NaN 速度目标的复位。 */
         reset_control();
-        return chassis_port_send(charge_limit_w);
+        return chassis_port_send();
     }
-    const float power_limit_w = update_power_limit(
-        power_unlimited, mode == CHASSIS_AUTO && command->nav_online && command->boost, &feedback);
+    /* boost 自动持续触发：受功率约束的模式请求额外放电；裁判反馈、电容在线与电量由 update_power_limit 内部判定。
+     * 停止态在此前已提前返回，不会走到这里。 */
+    const bool boost_requested = !power_unlimited;
+    const float power_limit_w = update_power_limit(power_unlimited, boost_requested, &feedback);
 
     /* 由轮速解算底盘实际速度。 */
     const float measured_vx = (-wheel_speed[0] - wheel_speed[1] + wheel_speed[2] + wheel_speed[3]) * VELOCITY_SCALE;
@@ -219,7 +226,7 @@ bool chassis_update(const chassis_command_t *command, uint32_t tick)
         }
     }
 
-    if (!chassis_port_send(charge_limit_w))
+    if (!chassis_port_send())
     {
         reset_control();
         return false;
@@ -410,12 +417,12 @@ static void resolve_target(chassis_mode_t mode, const chassis_command_t *command
 
     case CHASSIS_BEHAVIOR_TRANSLATE:
     {
-        /* 只平移：平移请求在上电世界系；自转为零。 */
+        /* 世界系直控：平移请求在上电世界系；自转采用请求，限幅到角速度上限。 */
         const float cos_yaw = cosf(feedback->chassis_yaw);
         const float sin_yaw = sinf(feedback->chassis_yaw);
         target->vx = cos_yaw * request.vx + sin_yaw * request.vy;
         target->vy = -sin_yaw * request.vx + cos_yaw * request.vy;
-        target->wz = 0.0f;
+        target->wz = float_constrain(request.wz, -CHASSIS_MAX_ANGULAR_RAD_S, CHASSIS_MAX_ANGULAR_RAD_S);
         break;
     }
 
@@ -543,26 +550,28 @@ static float update_power_limit(bool power_unlimited, bool boost, const chassis_
         return power_unlimited ? CHASSIS_SUPPLY_POWER_LIMIT_W : CHASSIS_POWER_OFFLINE_LIMIT_W;
     }
 
-    /* 电容离线时没有实测功率，不积分，仅由裁判缓冲能量限制虚拟缓冲。 */
+    /* 电容离线时没有实测功率，不积分：虚拟缓冲先回到上限，再由下面的限幅跟随裁判缓冲能量，
+     * 裁判缓冲恢复后预算随之恢复。 */
     if (feedback->supercap_online)
     {
         virtual_buffer_j += control_period_s * (expected_power_w - feedback->chassis_power_w);
     }
+    else
+    {
+        virtual_buffer_j = CHASSIS_POWER_BUFFER_LIMIT_J;
+    }
     virtual_buffer_j = float_constrain(virtual_buffer_j, 0.0f,
                                        fminf(feedback->buffer_energy_j, CHASSIS_POWER_BUFFER_LIMIT_J));
 
-    /* boost：有请求且电容允许放电时，在裁判上限之上放开固定的额外功率，仍属受限。 */
+    /* boost：有请求且电容允许放电（在线且无错误）时，额外功率随电量在起始与全开阈值之间线性放开，电量不足时回落为裁判上限。 */
     float power_limit_w = feedback->power_limit_w;
     if (boost && feedback->supercap_enabled)
     {
-        power_limit_w += CHASSIS_POWER_BOOST_EXCESS_W;
+        power_limit_w += CHASSIS_POWER_BOOST_EXCESS_W
+            * float_constrain(((float)feedback->cap_energy - (float)CHASSIS_SUPERCAP_BOOST_START_ENERGY)
+                              / (float)(CHASSIS_SUPERCAP_BOOST_FULL_ENERGY - CHASSIS_SUPERCAP_BOOST_START_ENERGY), 0.0f, 1.0f);
     }
     expected_power_w = power_limit_w;
-
-    /* 超出裁判上限的部分随电容电压从启动阈值到全开阈值线性放开，电压不足时回落到裁判上限。 */
-    power_limit_w = feedback->power_limit_w + (power_limit_w - feedback->power_limit_w)
-        * float_constrain((feedback->supercap_voltage_v - CHASSIS_SUPERCAP_BOOST_START_V)
-                          / (CHASSIS_SUPERCAP_BOOST_FULL_V - CHASSIS_SUPERCAP_BOOST_START_V), 0.0f, 1.0f);
 
     return power_unlimited ? CHASSIS_SUPPLY_POWER_LIMIT_W
         : (power_limit_w + CHASSIS_POWER_EXCESS_W) * virtual_buffer_j / CHASSIS_POWER_BUFFER_LIMIT_J;

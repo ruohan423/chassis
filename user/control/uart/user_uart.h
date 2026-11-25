@@ -19,8 +19,10 @@ typedef struct
 
 extern uart_rx_t remote_uart_rx;
 extern uart_rx_t judge_uart_rx;
+extern uart_rx_t host_uart_rx;
 extern osSemaphoreId_t RemoteSemHandle;
 extern osSemaphoreId_t JudgeSemHandle;
+extern osSemaphoreId_t UartComSemHandle;
 
 /* DMA 必须已在生成配置中设为 Circular，保留 HT/TC 中断用于持续流接收；函数会把 rx->buffer 交给 DMA 持续写入。 */
 bool uart_rx_start(uart_rx_t *rx);

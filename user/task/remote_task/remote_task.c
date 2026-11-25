@@ -2,6 +2,7 @@
  * 线程名称 remote_task，入口 Remote_Task，优先级 osPriorityLow，栈 512 字节。
  * 若界面以 32 位字填写栈大小，填 128。
  * 二值信号量名称 RemoteSem，最大值 1、初值 0，句柄为 RemoteSemHandle。
+ * USART3 按 DBUS 配置：100000 bps、Word Length 9 Bits（含校验位，即 8 位数据）、Parity Even、1 停止位。
  * USART3 RX DMA 使用 Circular，USART/DMA 中断优先级为 5；收到有效输入前保持安全默认。
  */
 #include "remote_task.h"
@@ -20,6 +21,8 @@
 
 #define REMOTE_SEMAPHORE_WAIT_MS 10U
 #define REMOTE_LINK_TIMEOUT_MS 100U
+/* DBUS 一帧 18 字节约 2 ms、帧周期 14 ms，残帧超时取在帧内最长间隔与帧间空闲之间；未上板标定。 */
+#define REMOTE_FRAME_TIMEOUT_MS 6U
 
 #define REMOTE_DMA_BUFFER_SIZE 128U
 
@@ -33,10 +36,12 @@ uart_rx_t remote_uart_rx = {
 static uint8_t frame[RC_FRAME_LENGTH];
 static uint8_t frame_length;
 static uint8_t received_data[REMOTE_DMA_BUFFER_SIZE];
+static uint32_t last_byte_tick;
 static uint32_t last_valid_frame_tick;
 static bool has_valid_frame;
+static bool stop_latched;  /* 仅 s2=2 急停置位；链路超时进入的停止态不锁存，恢复后按拨杆直接回到对应模式。 */
 
-static void process_received_data(const uint8_t *data, uint16_t data_length, bool dma_overrun);
+static void process_received_data(const uint8_t *data, uint16_t data_length);
 static void RemoteCallback(const Remote *rc);
 static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey);
 static void StopCallback(void);
@@ -54,21 +59,31 @@ void Remote_Task(void *argument)
     for (;;)
     {
         (void)osSemaphoreAcquire(RemoteSemHandle, REMOTE_SEMAPHORE_WAIT_MS);
+        const uint32_t now_tick = osKernelGetTickCount();
 
         if (!uart_started || remote_uart_rx.error_pending)
         {
-            remote_clear();
-            actChassis = CHASSIS_STOP;
+            /* 线路错误或启动失败只丢弃残帧并重启接收，遥控数据和模式保持；持续收不到有效帧时由下方链路超时进入停止态。 */
             frame_length = 0U;
-            has_valid_frame = false;
             uart_started = uart_rx_start(&remote_uart_rx);
-            continue;
+        }
+        else
+        {
+            bool dma_overrun;
+            const uint16_t received_length = uart_rx_read(&remote_uart_rx, received_data, &dma_overrun);
+            /* 残帧只复位拼帧：DBUS 无同步字，靠帧间空闲对齐，避免旧残帧与新帧拼出通过范围校验的错位帧。 */
+            if (dma_overrun || (frame_length != 0U && now_tick - last_byte_tick >= REMOTE_FRAME_TIMEOUT_MS))
+            {
+                frame_length = 0U;
+            }
+            if (received_length != 0U)
+            {
+                last_byte_tick = now_tick;
+            }
+            process_received_data(received_data, received_length);
         }
 
-        bool dma_overrun;
-        const uint16_t received_length = uart_rx_read(&remote_uart_rx, received_data, &dma_overrun);
-        process_received_data(received_data, received_length, dma_overrun);
-
+        /* 遥控器关机、断线或持续线路错误：回到零输出停止态但不锁存，收到有效帧后按拨杆恢复，不复位系统。 */
         if (has_valid_frame && (osKernelGetTickCount() - last_valid_frame_tick >= REMOTE_LINK_TIMEOUT_MS))
         {
             remote_clear();
@@ -79,10 +94,8 @@ void Remote_Task(void *argument)
     }
 }
 
-static void process_received_data(const uint8_t *data, uint16_t data_length, bool dma_overrun)
+static void process_received_data(const uint8_t *data, uint16_t data_length)
 {
-    if (dma_overrun){frame_length = 0U;}
-
     for (uint16_t index = 0U; index < data_length; index++)
     {
         frame[frame_length++] = data[index];
@@ -109,7 +122,8 @@ static void process_received_data(const uint8_t *data, uint16_t data_length, boo
 
 static void RemoteCallback(const Remote *rc)
 {
-    if (actChassis == CHASSIS_STOP){
+    /* 只有 s2=2 急停锁存后拨回遥控输入才复位；链路超时后的重连不走复位流程。 */
+    if (stop_latched){
 
         __set_FAULTMASK(1);
         HAL_NVIC_SystemReset();
@@ -141,8 +155,8 @@ static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey)
     (void)key;
     (void)lastkey;
 
-    /* 停止态只能由遥控输入模式的复位流程退出。 */
-    if (actChassis == CHASSIS_STOP){return;}
+    /* 急停锁存只能由遥控输入模式的复位流程退出。 */
+    if (stop_latched){return;}
 
     /* 本回调只在 s2=3 时调用，子模式均受功率约束：s1=1 自由控制，s1=2 全自动（只取上位机指令），s1=3 小陀螺。 */
     switch (rc_data.rc.s1)
@@ -164,5 +178,6 @@ static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey)
 
 static void StopCallback(void)
 {
+    stop_latched = true;
     actChassis = CHASSIS_STOP;
 }

@@ -71,6 +71,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/led/board_led.h
         user/test/motor_test_task.c
         user/test/motor_test_task.h
+        user/test/uart_test_task.c
+        user/test/uart_test_task.h
         user/control/can/user_can.c
         user/control/can/user_can.h
         user/task/chassis_task/chassis_task.c
@@ -96,10 +98,14 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/task/chassis_task/chassis_task.h
         user/control/commun/usb_commun.c
         user/control/commun/usb_commun.h
+        user/control/commun/uart_commun.c
+        user/control/commun/uart_commun.h
         user/control/commun/can_commun.c
         user/control/commun/can_commun.h
         user/task/commun_task/usbcom_task.c
         user/task/commun_task/usbcom_task.h
+        user/task/commun_task/uartcom_task.c
+        user/task/commun_task/uartcom_task.h
         user/task/commun_task/cancom_task.c
         user/task/commun_task/cancom_task.h
 )

@@ -19,12 +19,12 @@ typedef struct
 extern chassis_motor_t chassis_motors[CHASSIS_MOTOR_COUNT];
 
 bool chassis_port_init(void);
-/* 每个控制周期调用一次：下发四轮指令并更新电容充电功率上限 charge_limit_w（单位 W）。
- * 离线电机的指令在此清零，各轮指令限幅到 CHASSIS_MOTOR_OUTPUT_LIMIT；发送失败返回 false。 */
-bool chassis_port_send(float charge_limit_w);
+/* 每个控制周期调用一次：下发四轮指令。离线电机的指令在此清零，各轮指令限幅到 CHASSIS_MOTOR_OUTPUT_LIMIT；发送失败返回 false。 */
+bool chassis_port_send(void);
+/* 转发电容指令：转发裁判功率上限和缓冲能量给电容板，充电由电容板自行闭环；enable_dcdc 仅在裁判在线且 chassis 口输出开启时为真。 */
+void chassis_port_send_supercap(uint16_t power_limit_w, uint16_t buffer_energy_j, bool enable_dcdc);
 /* motor 仅在调用期间只读借用，函数不会保存指针。 */
 bool chassis_motor_is_online(const chassis_motor_t *motor);
-
 /* 裁判、电容与姿态反馈快照，已做在线判断和单位换算。
  * 云台相对角约定：云台正前方与底盘正前方（x 轴）重合时为 0，俯视云台相对底盘逆时针转动为正；
  * 零位和方向由云台侧标定后下发，port 层只归一化到下列范围。 */
@@ -33,20 +33,21 @@ typedef struct
     float power_limit_w;          /* 裁判底盘功率上限 W，referee_online 为真时有效 */
     float buffer_energy_j;        /* 裁判缓冲能量 J，referee_online 为真时有效 */
     float chassis_power_w;        /* 电容实测底盘功率 W，supercap_online 为真时有效 */
-    float supercap_voltage_v;     /* 电容组电压 V，supercap_online 为真时有效 */
+    uint8_t cap_energy;           /* 电容电量，原始 0～255，supercap_online 为真时有效，量程待核对 */
     float chassis_yaw;            /* 底盘 IMU 的实时 yaw 角 rad，姿态解算启动时为 0、俯视逆时针为正，范围 -π～π；即底盘在上电世界系中的朝向，imu_valid 为真时有效 */
     float yaw_rate_rad_s;         /* 底盘 IMU 的 yaw 角速度 rad/s，imu_valid 为真时有效 */
     float gimbal_yaw_angle;       /* 云台相对底盘的 yaw 角 rad，范围 0～2π；云台在线时有效 */
     float gimbal_yaw_target_offset_rad; /* 云台目标角相对实测角的偏移量 rad，正方向同相对角；来源未接入，当前为 0 */
     bool referee_online;          /* 机器人性能与功率热量数据均未超时 */
-    bool supercap_online;         /* 电容在线，实测功率和电压可信 */
-    bool supercap_enabled;        /* 电容允许放电，离线时为假 */
+    bool supercap_output_enabled; /* 裁判在线且 chassis 电源管理输出开启 */
+    bool supercap_online;         /* 电容在线，实测功率和电量可信 */
+    bool supercap_enabled;        /* 电容允许放电：在线且无错误，离线时为假 */
     bool imu_valid;               /* 姿态解算已开始发布 yaw 角和角速度，两者同一次发布、共用该标志 */
     bool gimbal_online;           /* 云台角度反馈未超时 */
 } chassis_feedback_t;
 
 /* 仅任务上下文调用；feedback 为调用方输出对象，仅在调用期间写入且不保存指针。
- * 内部以调度锁保护裁判、电容和姿态数据的快照复制，调用方不再加锁。 */
+ * 裁判和姿态数据以调度锁保护，电容快照由电容模块在任务/ISR 临界区内复制，调用方不再加锁。 */
 void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback);
 
 #endif

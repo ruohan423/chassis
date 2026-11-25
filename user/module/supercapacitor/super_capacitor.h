@@ -5,30 +5,32 @@
 #include <stdint.h>
 
 #define SUPER_CAPACITOR_STATUS_LENGTH  8U  /* 状态帧数据长度，单位字节 */
-#define SUPER_CAPACITOR_COMMAND_LENGTH 2U  /* 指令载荷长度，单位字节；RMCS 中占用 0x1FE 帧的最后两个字节 */
+#define SUPER_CAPACITOR_COMMAND_LENGTH 8U  /* 指令帧数据长度，单位字节 */
+#define SUPER_CAPACITOR_RX_ID          0x51U  /* 电容板发往底盘板的状态帧标识 */
+#define SUPER_CAPACITOR_TX_ID          0x61U  /* 底盘板发往电容板的指令帧标识 */
 
-/* 超级电容状态与指令，帧格式移植自 RMCS-main 的 Supercap 器件（状态帧 0x300）。
- * 电容通讯尚未接线：总线、帧标识和发送周期按实车确定后，由接收方调用 super_capacitor_update_status，
- * 由发送方调用 super_capacitor_build_command。未收到状态帧时 online 为假，功率控制按电容离线处理。 */
+/* 超级电容状态与指令，帧格式沿用 exter_add/Sentry_Chassis 的电容板协议。
+ * 状态帧（0x51）：字节 0 为错误码，1～4 为 float 底盘功率，5～6 为 uint16 上报功率上限（不解析），7 为 uint8 电量。
+ * 指令帧（0x61）：字节 0 为 enableDCDC 与 systemRestart 位，1～2 为 uint16 裁判功率上限，3～4 为 uint16 裁判缓冲能量，5～7 保留。
+ * 电容板自行充电，主控只转发裁判上限和缓冲能量；未收到状态帧时 online 为假，功率控制按电容离线处理。 */
 typedef struct
 {
-    bool online;              /* 状态帧未超时，由 super_capacitor_get_data 按最近更新时间判定 */
-    bool enabled;             /* 电容允许放电 */
-    float chassis_power_w;    /* 电容测得的底盘功率，单位 W */
-    float supercap_voltage_v; /* 电容组电压，单位 V */
-    float chassis_voltage_v;  /* 底盘母线电压，单位 V */
+    bool online;           /* 状态帧未超时，由 super_capacitor_get_data 按最近更新时间判定 */
+    bool error;            /* 错误码非零 */
+    float chassis_power_w; /* 电容测得的底盘功率，单位 W */
+    uint8_t cap_energy;    /* 电容电量，原始 0～255，量程待按电容板手册核对 */
 } super_capacitor_data_t;
 
-/* 解析一帧状态数据并刷新在线时间；data 在调用期间保持有效，不会被保存或修改。调用上下文待接线时确定；
- * 若在 CAN 接收中断中调用，读取方须改用任务/ISR 临界区保护，调度锁不能覆盖中断。 */
+/* 解析一帧状态数据并刷新在线时间；data 在调用期间保持有效，不会被保存。仅由 CAN 接收中断调用，
+ * 内部以任务/ISR 临界区保护共享状态，chassisPower 非有限值的帧丢弃且不刷新在线时间。 */
 void super_capacitor_update_status(const uint8_t *data);
-/* 返回模块内部只读状态，不转移所有权；后续状态更新会改变其内容，调用方不得写入或异步长期持有快照语义。 */
-const super_capacitor_data_t *super_capacitor_get_data(void);
+/* 任务上下文调用；复制模块内部状态到 data 并判定是否在线，内部以临界区保护，调用方不再加锁。 */
+void super_capacitor_get_data(super_capacitor_data_t *data);
 
-/* 保存控制层给出的充电功率上限（单位 W）和输出使能，供组帧使用。 */
-void super_capacitor_set_command(float charge_power_limit_w, bool enabled);
-/* 按当前保存的指令生成载荷：字节 0 为充电功率上限（0～255 W），字节 1 为使能。 */
-/* data 由调用方提供，至少有 SUPER_CAPACITOR_COMMAND_LENGTH 字节，仅在调用期间写入。 */
-void super_capacitor_build_command(uint8_t *data);
+/* 生成常规指令帧：按 enable_dcdc 设置 enableDCDC、systemRestart 清零，转发裁判功率上限和缓冲能量。
+ * data 由调用方提供，至少有 SUPER_CAPACITOR_COMMAND_LENGTH 字节，仅在调用期间写入。 */
+void super_capacitor_build_command(uint8_t *data, uint16_t power_limit_w, uint16_t buffer_energy_j, bool enable_dcdc);
+/* 生成上电使能帧：enableDCDC 与 systemRestart 均置位，其余字段为零。 */
+void super_capacitor_build_enable_command(uint8_t *data);
 
 #endif //SENTRY_CHASSIS_SUPERCAPACITOR_H

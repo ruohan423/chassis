@@ -89,10 +89,10 @@ const osThreadAttr_t cancom_task_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
-/* Definitions for usbcom_task */
-osThreadId_t usbcom_taskHandle;
-const osThreadAttr_t usbcom_task_attributes = {
-  .name = "usbcom_task",
+/* Definitions for uartcom_task */
+osThreadId_t uartcom_taskHandle;
+const osThreadAttr_t uartcom_task_attributes = {
+  .name = "uartcom_task",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
@@ -106,6 +106,11 @@ osSemaphoreId_t JudgeSemHandle;
 const osSemaphoreAttr_t JudgeSem_attributes = {
   .name = "JudgeSem"
 };
+/* Definitions for UartComSem */
+osSemaphoreId_t UartComSemHandle;
+const osSemaphoreAttr_t UartComSem_attributes = {
+  .name = "UartComSem"
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -118,7 +123,7 @@ void Watchdog_Task(void *argument);
 void Judge_Task(void *argument);
 void Chassis_Task(void *argument);
 void CanCom_Task(void *argument);
-void UsbCom_Task(void *argument);
+void UartCom_Task(void *argument);
 
 extern void MX_USB_DEVICE_Init(void);
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
@@ -143,6 +148,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of JudgeSem */
   JudgeSemHandle = osSemaphoreNew(1, 0, &JudgeSem_attributes);
+
+  /* creation of UartComSem */
+  UartComSemHandle = osSemaphoreNew(1, 0, &UartComSem_attributes);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -175,8 +183,8 @@ void MX_FREERTOS_Init(void) {
   /* creation of cancom_task */
   cancom_taskHandle = osThreadNew(CanCom_Task, NULL, &cancom_task_attributes);
 
-  /* creation of usbcom_task */
-  usbcom_taskHandle = osThreadNew(UsbCom_Task, NULL, &usbcom_task_attributes);
+  /* creation of uartcom_task */
+  uartcom_taskHandle = osThreadNew(UartCom_Task, NULL, &uartcom_task_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
 
@@ -298,22 +306,22 @@ __weak void CanCom_Task(void *argument)
   /* USER CODE END CanCom_Task */
 }
 
-/* USER CODE BEGIN Header_UsbCom_Task */
+/* USER CODE BEGIN Header_UartCom_Task */
 /**
-* @brief Function implementing the usbcom_task thread.
+* @brief Function implementing the uartcom_task thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_UsbCom_Task */
-__weak void UsbCom_Task(void *argument)
+/* USER CODE END Header_UartCom_Task */
+__weak void UartCom_Task(void *argument)
 {
-  /* USER CODE BEGIN UsbCom_Task */
+  /* USER CODE BEGIN UartCom_Task */
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END UsbCom_Task */
+  /* USER CODE END UartCom_Task */
 }
 
 /* Private application code --------------------------------------------------*/

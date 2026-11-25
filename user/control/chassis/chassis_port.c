@@ -47,8 +47,8 @@ static const float motor_directions[CHASSIS_MOTOR_COUNT] = {
 };
 static RM3508_TypeDef motor_raw[CHASSIS_MOTOR_COUNT];
 chassis_motor_t chassis_motors[CHASSIS_MOTOR_COUNT];
-/* 裁判电源管理 chassis 口输出状态，随反馈快照更新，作为电容指令的使能位。 */
-static bool supercap_output_enabled;
+/* 上电使能帧是否已成功发出；发送成功后切换为常规指令帧。 */
+static bool supercap_enable_sent;
 
 static void on_can_frame(CAN_HandleTypeDef *can_handle, const user_can_frame_t *frame);
 
@@ -58,12 +58,9 @@ bool chassis_port_init(void)
     return user_can_start(CHASSIS_CAN_HANDLE);
 }
 
-bool chassis_port_send(float charge_limit_w)
+bool chassis_port_send(void)
 {
     int16_t commands[CHASSIS_MOTOR_COUNT] = {0};
-
-    /* 电容通讯未接线：指令先交给电容模块保存，接线后在这里用 super_capacitor_build_command 组帧发送。 */
-    super_capacitor_set_command(charge_limit_w, supercap_output_enabled);
 
     for (uint32_t i = 0U; i < CHASSIS_MOTOR_COUNT; i++)
     {
@@ -77,6 +74,22 @@ bool chassis_port_send(float charge_limit_w)
         && MotorSend(CHASSIS_CAN_HANDLE, CHASSIS_MOTOR_COMMAND_ID, commands) == HAL_OK;
 }
 
+void chassis_port_send_supercap(uint16_t power_limit_w, uint16_t buffer_energy_j, bool enable_dcdc)
+{
+    uint8_t frame[SUPER_CAPACITOR_COMMAND_LENGTH];
+
+    if (!supercap_enable_sent && enable_dcdc)
+    {
+        /* 裁判允许 chassis 输出后才发使能加重启帧；发送成功后切到常规帧。 */
+        super_capacitor_build_enable_command(frame);
+        supercap_enable_sent = user_can_send(&hcan1, SUPER_CAPACITOR_TX_ID, frame, SUPER_CAPACITOR_COMMAND_LENGTH) == HAL_OK;
+        return;
+    }
+
+    super_capacitor_build_command(frame, power_limit_w, buffer_energy_j, enable_dcdc);
+    (void)user_can_send(&hcan1, SUPER_CAPACITOR_TX_ID, frame, SUPER_CAPACITOR_COMMAND_LENGTH);
+}
+
 bool chassis_motor_is_online(const chassis_motor_t *motor)
 {
     return motor->has_feedback && HAL_GetTick() - motor->feedback_tick <= CHASSIS_MOTOR_FEEDBACK_TIMEOUT_MS;
@@ -86,29 +99,29 @@ void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback)
 {
     static gimbal_data_t gimbal;
     const bool gimbal_online = can_commun_read_gimbal_data(&gimbal);
+    super_capacitor_data_t supercap;
+    super_capacitor_get_data(&supercap);
 
     *feedback = (chassis_feedback_t){0};
 
     const int32_t lock_state = osKernelLock();
     if (lock_state < 0)
     {
-        /* 未获得保护时不读取共享数据，按裁判、电容和姿态数据均无效处理。 */
-        supercap_output_enabled = false;
+        /* 未获得保护时不读取共享数据，按裁判和姿态数据均无效处理；电容快照已取，随反馈一起清零。 */
         return;
     }
 
     feedback->referee_online = judge_data_is_fresh(&judge_data, JUDGE_DATA_ROBOT_STATUS, tick)
         && judge_data_is_fresh(&judge_data, JUDGE_DATA_POWER_HEAT, tick);
+    feedback->supercap_output_enabled = feedback->referee_online
+        && judge_data.robot_status.power_management_chassis_output != 0U;
     feedback->power_limit_w = (float)judge_data.robot_status.chassis_power_limit;
     feedback->buffer_energy_j = (float)judge_data.power_heat.buffer_energy;
-    supercap_output_enabled = feedback->referee_online
-        && judge_data.robot_status.power_management_chassis_output != 0U;
     /* 2027 协议的 0x0202 无底盘实测功率，实测功率只取自电容。 */
-    const super_capacitor_data_t *supercap = super_capacitor_get_data();
-    feedback->supercap_online = supercap->online;
-    feedback->supercap_enabled = supercap->online && supercap->enabled;
-    feedback->chassis_power_w = supercap->chassis_power_w;
-    feedback->supercap_voltage_v = supercap->supercap_voltage_v;
+    feedback->supercap_online = supercap.online;
+    feedback->supercap_enabled = supercap.online && !supercap.error;
+    feedback->chassis_power_w = supercap.chassis_power_w;
+    feedback->cap_energy = supercap.cap_energy;
     feedback->imu_valid = usb_chassis_imu_valid;
     feedback->chassis_yaw = usb_chassis_yaw_rad;
     feedback->yaw_rate_rad_s = usb_chassis_wz_rad_s;

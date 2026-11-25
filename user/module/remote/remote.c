@@ -2,8 +2,9 @@
 
 RC_Ctl_t rc_data = {.rc = {1024, 1024, 1024, 1024, 1, 1}};
 
-#define REMOTE_CHANNEL_MIN 200U
-#define REMOTE_CHANNEL_MAX 1800U
+/* 通道合法范围取 DT7&DR16 用户手册的最小值 364、最大值 1684，仅用于识别错位帧。 */
+#define REMOTE_CHANNEL_MIN 364U
+#define REMOTE_CHANNEL_MAX 1684U
 
 /* 默认空实现 */
 static void remote_control_default(const Remote *rc) {

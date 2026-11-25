@@ -45,8 +45,8 @@ void Judge_Task(void *argument)
 
         if (!uart_started || judge_uart_rx.error_pending)
         {
-            judge_clear();
-            has_valid_frame = false;
+            /* 线路错误或启动失败只丢弃残帧并重启接收；已发布的裁判数据按逐项时间戳和下方链路超时失效。 */
+            judge_reset_parser();
             uart_started = uart_rx_start(&judge_uart_rx);
         }
         else
@@ -55,8 +55,7 @@ void Judge_Task(void *argument)
             const uint16_t received_length = uart_rx_read(&judge_uart_rx, received_data, &overrun);
             if (overrun)
             {
-                judge_clear();
-                has_valid_frame = false;
+                judge_reset_parser();
             }
             if (received_length == 0U && now_tick - last_byte_tick >= JUDGE_FRAME_TIMEOUT_MS)
             {
@@ -71,11 +70,12 @@ void Judge_Task(void *argument)
                 }
                 last_byte_tick = now_tick;
             }
-            if (has_valid_frame && now_tick - last_frame_tick >= JUDGE_LINK_TIMEOUT_MS)
-            {
-                judge_clear();
-                has_valid_frame = false;
-            }
+        }
+
+        if (has_valid_frame && now_tick - last_frame_tick >= JUDGE_LINK_TIMEOUT_MS)
+        {
+            judge_clear();
+            has_valid_frame = false;
         }
 
         process_transmit(osKernelGetTickCount());
