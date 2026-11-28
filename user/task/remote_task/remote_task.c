@@ -13,14 +13,13 @@
 #include "remote.h"
 #include "user_uart.h"
 #include "usart.h"
-#include "watch_task.h"
+#include "watchdog_control.h"
 
 #include <string.h>
 
 #include "main.h"
 
 #define REMOTE_SEMAPHORE_WAIT_MS 10U
-#define REMOTE_LINK_TIMEOUT_MS 100U
 /* DBUS 一帧 18 字节约 2 ms、帧周期 14 ms，残帧超时取在帧内最长间隔与帧间空闲之间；未上板标定。 */
 #define REMOTE_FRAME_TIMEOUT_MS 6U
 
@@ -37,11 +36,10 @@ static uint8_t frame[RC_FRAME_LENGTH];
 static uint8_t frame_length;
 static uint8_t received_data[REMOTE_DMA_BUFFER_SIZE];
 static uint32_t last_byte_tick;
-static uint32_t last_valid_frame_tick;
 static bool has_valid_frame;
 static bool stop_latched;  /* 仅 s2=2 急停置位；链路超时进入的停止态不锁存，恢复后按拨杆直接回到对应模式。 */
 
-static void process_received_data(const uint8_t *data, uint16_t data_length);
+static bool process_received_data(const uint8_t *data, uint16_t data_length);
 static void RemoteCallback(const Remote *rc);
 static void MouseKeyCallback(const Mouse *mouse, Key_t key, Key_t lastkey);
 static void StopCallback(void);
@@ -80,11 +78,14 @@ void Remote_Task(void *argument)
             {
                 last_byte_tick = now_tick;
             }
-            process_received_data(received_data, received_length);
+            if (process_received_data(received_data, received_length))
+            {
+                watchdog_control_feed(WATCH_REMOTE);
+            }
         }
 
         /* 遥控器关机、断线或持续线路错误：回到零输出停止态但不锁存，收到有效帧后按拨杆恢复，不复位系统。 */
-        if (has_valid_frame && (osKernelGetTickCount() - last_valid_frame_tick >= REMOTE_LINK_TIMEOUT_MS))
+        if (has_valid_frame && watchdog_control_is_expired(WATCH_REMOTE))
         {
             remote_clear();
             actChassis = CHASSIS_STOP;
@@ -94,8 +95,9 @@ void Remote_Task(void *argument)
     }
 }
 
-static void process_received_data(const uint8_t *data, uint16_t data_length)
+static bool process_received_data(const uint8_t *data, uint16_t data_length)
 {
+    bool valid_frame_received = false;
     for (uint16_t index = 0U; index < data_length; index++)
     {
         frame[frame_length++] = data[index];
@@ -104,9 +106,8 @@ static void process_received_data(const uint8_t *data, uint16_t data_length)
 
         if (remote_frame_is_valid(frame))
         {
-            last_valid_frame_tick = osKernelGetTickCount();
             has_valid_frame = true;
-            swdg_feed_remote();
+            valid_frame_received = true;
             remote_rx(frame);
             CanCom_TaskNotifyRemoteFrame();
             frame_length = 0U;
@@ -117,6 +118,7 @@ static void process_received_data(const uint8_t *data, uint16_t data_length)
             frame_length = RC_FRAME_LENGTH - 1U;
         }
     }
+    return valid_frame_received;
 }
 
 

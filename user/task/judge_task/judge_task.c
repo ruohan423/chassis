@@ -10,6 +10,7 @@
 #include "judge.h"
 #include "user_uart.h"
 #include "usart.h"
+#include "watchdog_control.h"
 
 #define JUDGE_DMA_BUFFER_SIZE 1024U
 #define JUDGE_SEMAPHORE_WAIT_MS 10U
@@ -32,7 +33,6 @@ void Judge_Task(void *argument)
     (void)argument;
 
     uint32_t last_byte_tick = 0U;
-    uint32_t last_frame_tick = 0U;
     bool has_valid_frame = false;
 
     judge_clear();
@@ -65,14 +65,14 @@ void Judge_Task(void *argument)
             {
                 if (judge_receive(received_data, received_length, now_tick))
                 {
-                    last_frame_tick = now_tick;
+                    watchdog_control_feed(WATCH_JUDGE);
                     has_valid_frame = true;
                 }
                 last_byte_tick = now_tick;
             }
         }
 
-        if (has_valid_frame && now_tick - last_frame_tick >= JUDGE_LINK_TIMEOUT_MS)
+        if (has_valid_frame && watchdog_control_is_expired(WATCH_JUDGE))
         {
             judge_clear();
             has_valid_frame = false;

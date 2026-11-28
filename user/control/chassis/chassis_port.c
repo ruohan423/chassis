@@ -92,7 +92,9 @@ void chassis_port_send_supercap(uint16_t power_limit_w, uint16_t buffer_energy_j
 
 bool chassis_motor_is_online(const chassis_motor_t *motor)
 {
-    return motor->has_feedback && HAL_GetTick() - motor->feedback_tick <= CHASSIS_MOTOR_FEEDBACK_TIMEOUT_MS;
+    /* 先固定中断写入的时间戳再取当前时刻，避免接收中断插在两次读取之间使差值回绕而误判离线。 */
+    const uint32_t feedback_tick = motor->feedback_tick;
+    return motor->has_feedback && HAL_GetTick() - feedback_tick <= CHASSIS_MOTOR_FEEDBACK_TIMEOUT_MS;
 }
 
 void chassis_port_read_feedback(uint32_t tick, chassis_feedback_t *feedback)

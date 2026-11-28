@@ -60,7 +60,8 @@ extern uart_rx_t host_uart_rx;
 
 void uart_commun_update_imu(float yaw_rad, float yaw_rate_rad_s);
 void uart_commun_reset(void);
-void uart_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks);
+/* 返回本次读取的数据中是否解析出至少一帧通过校验的控制帧或哨兵帧。 */
+bool uart_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks);
 /* command 为调用方输出对象；仅在调用期间写入，不会保存该指针。 */
 bool uart_read_command(uart_receive_cmd_t *command);
 void uart_send_update(uint32_t now_tick);

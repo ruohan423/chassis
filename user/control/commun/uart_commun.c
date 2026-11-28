@@ -247,7 +247,7 @@ void uart_send_update(uint32_t now_tick)
     }
 }
 
-static void process_frame(void)
+static bool process_frame(void)
 {
     uint32_t frame_header;
     memcpy(&frame_header, receive_frame, sizeof(frame_header));
@@ -295,11 +295,14 @@ static void process_frame(void)
 
     receive_frame_length -= consumed;
     memmove(receive_frame, &receive_frame[consumed], receive_frame_length);
+    /* 两种帧长均大于 1，整帧被消费即表示本帧通过校验。 */
+    return consumed != 1U;
 }
 
-void uart_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
+bool uart_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
 {
     static uint8_t received_data[UART_RX_BUFFER_SIZE];
+    bool valid_frame_received = false;
     bool overrun;
     const uint16_t length = uart_rx_read(&host_uart_rx, received_data, &overrun);
     if (overrun)
@@ -324,13 +327,17 @@ void uart_receive_process(uint32_t now_tick, uint32_t frame_timeout_ticks)
             {
                 break;
             }
-            process_frame();
+            if (process_frame())
+            {
+                valid_frame_received = true;
+            }
         }
     }
     if (length != 0U)
     {
         last_receive_tick = now_tick;
     }
+    return valid_frame_received;
 }
 
 bool uart_read_command(uart_receive_cmd_t *command)

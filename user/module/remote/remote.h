@@ -74,6 +74,7 @@ typedef enum {
     STOP            = 2,
 } InputMode_e;
 
+/* 仅 Remote_Task 写入；其他任务须在调度锁内复制所需字段，ISR/DMA 不访问。 */
 extern RC_Ctl_t rc_data;
 
 /* 回调函数指针类型 */
@@ -85,8 +86,11 @@ typedef void (*StopControlCallback)(void);
 /* 注册三个回调；传 NULL 使用默认空实现 */
 void Remote_RegisterCallbacks(RemoteControlCallback remoteCb,MouseKeyControlCallback mouseKeyCb,StopControlCallback stopCb);
 
+/* frame 必须指向完整的 18 字节只读帧；仅检查四通道范围和两个拨杆非零。 */
 bool remote_frame_is_valid(const uint8_t *frame);
-/* frame 为调用方持有的 18 字节只读帧，仅在调用期间借用，函数不会保存指针。 */
+/* 仅 Remote_Task 在内核启动后调用，frame 须已通过 remote_frame_is_valid()。
+ * frame 仅在调用期间借用，不保存指针；内部保护快照发布及历史字段更新，回调在内部锁外执行。 */
 void remote_rx(const uint8_t *frame);
+/* 仅 Remote_Task 在内核启动后调用；内部以调度锁保护清零，不触发模式回调。 */
 void remote_clear(void);
 #endif //SENTRY_CHASSIS_REMOTE_H

@@ -20,7 +20,7 @@
 #include "calib_task.h"
 #include "bias_config.h"
 #include "heater.h"
-#include "watch_task.h"
+#include "watchdog_control.h"
 #include "vqf.h"
 
 #define RAD_TO_DEG 57.295779513f
@@ -59,7 +59,7 @@ void INS_Task(void *argument)
     for (;;)
     {
         Calib_ReadImu(imu_gyro, imu_accel, &imu_temperature_c);
-        swdg_feed_imu();
+        watchdog_control_feed(WATCH_IMU);
 
         const uint32_t now_tick = osKernelGetTickCount();
         const uint32_t heater_elapsed_ticks = now_tick - last_heater_tick;

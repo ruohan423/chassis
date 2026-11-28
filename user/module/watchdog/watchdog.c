@@ -21,7 +21,7 @@ void watchdog_swdg_feed(watchdog_swdg_t *watchdog)
 
 bool watchdog_swdg_is_expired(const watchdog_swdg_t *watchdog)
 {
-    return (osKernelGetTickCount() - watchdog->last_feed_tick) > watchdog->timeout_ms;
+    return (osKernelGetTickCount() - watchdog->last_feed_tick) >= watchdog->timeout_ms;
 }
 
 #if defined(HAL_IWDG_MODULE_ENABLED)

@@ -63,6 +63,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/motor/motor.h
         user/module/watchdog/watchdog.c
         user/module/watchdog/watchdog.h
+        user/control/watchdog/watchdog_control.c
+        user/control/watchdog/watchdog_control.h
         user/task/watch_task/watch_task.c
         user/task/watch_task/watch_task.h
         user/module/buzzer/buzzer.c
@@ -71,8 +73,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/module/led/board_led.h
         user/test/motor_test_task.c
         user/test/motor_test_task.h
-        user/test/uart_test_task.c
-        user/test/uart_test_task.h
+        user/test/uart_test.c
+        user/test/uart_test.h
         user/control/can/user_can.c
         user/control/can/user_can.h
         user/task/chassis_task/chassis_task.c
@@ -96,14 +98,14 @@ add_executable(${CMAKE_PROJECT_NAME}
         user/task/remote_task/remote_task.h
         user/task/ins_task/ins_task.h
         user/task/chassis_task/chassis_task.h
-        user/control/commun/usb_commun.c
-        user/control/commun/usb_commun.h
+        user/test/usb_commun.c
+        user/test/usb_commun.h
         user/control/commun/uart_commun.c
         user/control/commun/uart_commun.h
         user/control/commun/can_commun.c
         user/control/commun/can_commun.h
-        user/task/commun_task/usbcom_task.c
-        user/task/commun_task/usbcom_task.h
+        user/test/usbcom_task.c
+        user/test/usbcom_task.h
         user/task/commun_task/uartcom_task.c
         user/task/commun_task/uartcom_task.h
         user/task/commun_task/cancom_task.c
@@ -147,6 +149,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/control/uart
         ${CMAKE_SOURCE_DIR}/user/module/dwt
         ${CMAKE_SOURCE_DIR}/user/module/watchdog
+        ${CMAKE_SOURCE_DIR}/user/control/watchdog
         ${CMAKE_SOURCE_DIR}/user/module/buzzer
         ${CMAKE_SOURCE_DIR}/user/module/led
         ${CMAKE_SOURCE_DIR}/user/control/can
@@ -157,6 +160,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         ${CMAKE_SOURCE_DIR}/user/task/remote_task
         ${CMAKE_SOURCE_DIR}/user/task/watch_task
         ${CMAKE_SOURCE_DIR}/user/task/test
+        ${CMAKE_SOURCE_DIR}/user/test
         ${CMAKE_SOURCE_DIR}/user/control/chassis
         ${CMAKE_SOURCE_DIR}/user/control/heater
         ${CMAKE_SOURCE_DIR}/user/algorithm/ramp

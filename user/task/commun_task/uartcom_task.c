@@ -7,9 +7,16 @@
 
 #include "cmsis_os2.h"
 #include "uart_commun.h"
+#include "watchdog_control.h"
 
 #define UART_TASK_PERIOD_MS 2U
 #define UART_RX_FRAME_TIMEOUT_MS 50U
+
+#define UART_SEND_TEST 0  /* 1：发送 uart_test.c 的模拟数据包，联调上位机协议用；0：正式发送。接收处理两者相同。 */
+
+#if UART_SEND_TEST
+#include "uart_test.h"
+#endif
 
 void UartCom_Task(void *argument)
 {
@@ -33,10 +40,17 @@ void UartCom_Task(void *argument)
         }
         else
         {
-            uart_receive_process(now_tick, frame_timeout_ticks);
+            if (uart_receive_process(now_tick, frame_timeout_ticks))
+            {
+                watchdog_control_feed(WATCH_HOST);
+            }
         }
 
+#if UART_SEND_TEST
+        uart_test_send_update(now_tick);
+#else
         uart_send_update(now_tick);
+#endif
         next_tick += period_ticks;
         osDelayUntil(next_tick);
     }

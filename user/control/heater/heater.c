@@ -17,6 +17,7 @@ typedef struct
 } heater_pid_t;
 
 static heater_pid_t heater_pid;
+static bool heater_fault;
 
 static float heater_pid_calculate(float temperature_c, float sample_period_s);
 
@@ -31,26 +32,24 @@ bool heater_init(void)
     };
 
     __HAL_TIM_SET_COMPARE(&htim10, TIM_CHANNEL_1, 0U);
-    return HAL_TIM_PWM_Start(&htim10, TIM_CHANNEL_1) == HAL_OK;
+    heater_fault = HAL_TIM_PWM_Start(&htim10, TIM_CHANNEL_1) != HAL_OK;
+    return !heater_fault;
 }
 
 bool heater_update(float temperature_c, float sample_period_s)
 {
-    /* 超过安全上限：复位积分并关闭加热 */
-    if (temperature_c >= TEMP_LIMIT_C)
+    /* 无效温度、周期或超温均锁存故障，只能由 heater_init 重新使能。 */
+    if (!isfinite(temperature_c) || temperature_c < -40.0f || temperature_c > 125.0f
+        || temperature_c >= TEMP_LIMIT_C || !isfinite(sample_period_s) || sample_period_s <= 0.0f)
     {
+        heater_fault = true;
         heater_pid.integral = 0.0f;
         heater_pid.previous_error = 0.0f;
         heater_stop();
         return false;
     }
 
-    if (temperature_c > TEMP_TARGET_C)
-    {
-        /* 加热器不能主动降温，超过目标温度后关闭 PWM 自然冷却。 */
-        heater_stop();
-        return true;
-    }
+    if (heater_fault) return false;
 
     __HAL_TIM_SET_COMPARE(&htim10, TIM_CHANNEL_1,
                          (uint16_t)(heater_pid_calculate(temperature_c, sample_period_s) / HEATER_OUT_MAX
@@ -77,8 +76,9 @@ static float heater_pid_calculate(float temperature_c, float sample_period_s)
                                heater_pid.integral_limit);
     unsaturated_output = heater_pid.kp * error + integral_candidate + heater_pid.kd * derivative;
 
-    /* 输出已到加热上限且误差仍要求升温时，停止继续积分。 */
-    if (unsaturated_output > heater_pid.max_out && error > 0.0f)
+    /* 单向加热输出的上下限均参与抗积分饱和。 */
+    if ((unsaturated_output > heater_pid.max_out && error > 0.0f)
+        || (unsaturated_output < 0.0f && error < 0.0f))
     {
         unsaturated_output = heater_pid.kp * error + heater_pid.integral
             + heater_pid.kd * derivative;

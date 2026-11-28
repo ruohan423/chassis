@@ -1,26 +1,20 @@
-/* CubeMX 创建说明：仅上板联调上位机串口协议时由用户创建，不用于常规运行。
- * 名称 uart_test_task，入口 UartTest_Task，优先级 osPriorityLow，栈 512 字节；CMSIS-RTOS2 stack_size 单位为字节，
- * 界面以 32 位字填写时填 128。无独立信号量；当前周期要求内核时钟为 1000 Hz。
- * 本任务独占 USART1 TX（Normal DMA），按 uart_commun.c 的发送帧格式直接发出模拟数据，不经过 uart_send_update()；
- * 启用时必须停用 uartcom_task（或把该线程入口改为 UartTest_Task），两者不得同时发送。
- * 本任务不启动 USART1 接收，测试期间上位机下行帧不被处理。
+/* 上位机串口协议联调用的模拟发送，不创建线程，不用于常规运行。
+ * UartCom_Task 在 UART_SEND_TEST 置 1 时调用 uart_test_send_update() 代替 uart_send_update()，接收处理不变；
+ * 两者只调用其一，USART1 TX（Normal DMA）仍只由 UartCom_Task 提交。
+ * 帧格式与 uart_commun.c 的发送帧一致，载荷为本文件的固定模拟数据，不读取也不改写 judge_data、IMU 和云台反馈。
+ * 时间比较直接以 tick 计，要求内核时钟为 1000 Hz。
  */
-#include "uart_test_task.h"
+#include "uart_test.h"
 
 #include <stddef.h>
 #include <string.h>
 
-#include "cmsis_os2.h"
 #include "judge.h"
 #include "uart_commun.h"
 #include "usart.h"
 
-#define UART_TEST_PERIOD_MS        UART_SEND_MIN_INTERVAL_MS      /* 任务周期，同时是相邻两帧的最小起发间隔，单位 ms。 */
-#define UART_TEST_STATE_PERIOD_MS  UART_STATE_SEND_INTERVAL_MS    /* 底盘状态帧发送周期，单位 ms，与正式发送一致为 100 Hz。 */
-#define UART_TEST_TX_TIMEOUT_MS    50U                            /* 单帧 DMA 发送超时，单位 ms；超时后中止本帧，与 uart_commun.c 一致。 */
-#define UART_TEST_FRAME_COUNT      3U                             /* 每种数据包循环发送的模拟帧数。 */
-#define UART_TEST_JUDGE_COUNT      16U                            /* 转发的裁判数据包种类数，与 uart_commun.c 的转发表一致。 */
-#define UART_TEST_STATE_INDEX      UART_TEST_JUDGE_COUNT          /* 状态帧在发送时刻表和帧序号表中的下标。 */
+#define UART_TEST_TX_TIMEOUT_MS    50U                                          /* 单帧 DMA 发送超时，单位 ms；超时后中止本帧，与 uart_commun.c 一致。 */
+#define UART_TEST_FRAME_COUNT      3U                                           /* 每种数据包循环发送的模拟帧数。 */
 #define UART_TEST_TX_BUFFER_SIZE   (8U + sizeof(ground_robot_position_t) + 1U)  /* 最长帧：4 字节帧头、4 字节时间戳、40 字节载荷和 1 字节帧尾。 */
 
 typedef struct
@@ -140,110 +134,110 @@ static const sentry_info_t sentry_info_frames[UART_TEST_FRAME_COUNT] = {
 
 /* 周期取自 2027 通信协议表 1-5 的常规链路发送频率，3 Hz 取 333 ms；
  * 0x0002、0x0206、0x0207 为事件触发、协议无固定频率，测试中按 1 Hz 发送。 */
-#define TEST_PACKET(id, period, array) {id, period, sizeof((array)[0]), (const uint8_t *)(array)}
-static const test_packet_t judge_packets[UART_TEST_JUDGE_COUNT] = {
-    TEST_PACKET(0x0001U, 1000U, game_status_frames),
-    TEST_PACKET(0x0002U, 1000U, game_result_frames),
-    TEST_PACKET(0x0003U, 333U, robot_hp_frames),
-    TEST_PACKET(0x0101U, 1000U, event_frames),
-    TEST_PACKET(0x0104U, 1000U, warning_frames),
-    TEST_PACKET(0x0105U, 1000U, dart_info_frames),
-    TEST_PACKET(0x0201U, 100U, robot_status_frames),
-    TEST_PACKET(0x0202U, 100U, power_heat_frames),
-    TEST_PACKET(0x0203U, 1000U, robot_pos_frames),
-    TEST_PACKET(0x0204U, 333U, buff_frames),
-    TEST_PACKET(0x0206U, 1000U, hurt_frames),
-    TEST_PACKET(0x0207U, 1000U, shoot_frames),
-    TEST_PACKET(0x0208U, 100U, projectile_allowance_frames),
-    TEST_PACKET(0x0209U, 333U, rfid_frames),
-    TEST_PACKET(0x020BU, 1000U, ground_position_frames),
-    TEST_PACKET(0x020DU, 1000U, sentry_info_frames),
+#define UART_TEST_PACKET_ENTRY(id, period, array) {id, period, sizeof((array)[0]), (const uint8_t *)(array)}
+static const test_packet_t test_judge_packets[] = {
+    UART_TEST_PACKET_ENTRY(0x0001U, 1000U, game_status_frames),
+    UART_TEST_PACKET_ENTRY(0x0002U, 1000U, game_result_frames),
+    UART_TEST_PACKET_ENTRY(0x0003U, 333U, robot_hp_frames),
+    UART_TEST_PACKET_ENTRY(0x0101U, 1000U, event_frames),
+    UART_TEST_PACKET_ENTRY(0x0104U, 1000U, warning_frames),
+    UART_TEST_PACKET_ENTRY(0x0105U, 1000U, dart_info_frames),
+    UART_TEST_PACKET_ENTRY(0x0201U, 100U, robot_status_frames),
+    UART_TEST_PACKET_ENTRY(0x0202U, 100U, power_heat_frames),
+    UART_TEST_PACKET_ENTRY(0x0203U, 1000U, robot_pos_frames),
+    UART_TEST_PACKET_ENTRY(0x0204U, 333U, buff_frames),
+    UART_TEST_PACKET_ENTRY(0x0206U, 1000U, hurt_frames),
+    UART_TEST_PACKET_ENTRY(0x0207U, 1000U, shoot_frames),
+    UART_TEST_PACKET_ENTRY(0x0208U, 100U, projectile_allowance_frames),
+    UART_TEST_PACKET_ENTRY(0x0209U, 333U, rfid_frames),
+    UART_TEST_PACKET_ENTRY(0x020BU, 1000U, ground_position_frames),
+    UART_TEST_PACKET_ENTRY(0x020DU, 1000U, sentry_info_frames),
 };
-#undef TEST_PACKET
+#undef UART_TEST_PACKET_ENTRY
+
+#define UART_TEST_JUDGE_COUNT  (sizeof(test_judge_packets) / sizeof(test_judge_packets[0]))  /* 模拟的裁判数据包种类数，由上表推出，不直接修改。 */
+#define UART_TEST_STATE_INDEX  UART_TEST_JUDGE_COUNT                                         /* 状态帧在发送时刻表和帧序号表中的下标。 */
 
 /* DMA 发送缓冲区：仅在 huart1.gState 回到 READY（上一帧结束或已中止）后改写。 */
-static uint8_t tx_buffer[UART_TEST_TX_BUFFER_SIZE];
-static uint32_t due_tick[UART_TEST_JUDGE_COUNT + 1U];
-static uint8_t frame_index[UART_TEST_JUDGE_COUNT + 1U];
+static uint8_t test_tx_buffer[UART_TEST_TX_BUFFER_SIZE];
+static uint32_t test_due_tick[UART_TEST_JUDGE_COUNT + 1U];
+static uint8_t test_frame_index[UART_TEST_JUDGE_COUNT + 1U];
+static uint32_t test_tx_start_tick;
+static uint8_t test_next_judge_packet;
+static bool test_started;
 
-void UartTest_Task(void *argument)
+void uart_test_send_update(uint32_t now_tick)
 {
-    (void)argument;
-
-    uint32_t next_tick = osKernelGetTickCount();
-    uint32_t tx_start_tick = next_tick;
-    uint8_t next_judge_packet = 0U;
-    for (uint8_t index = 0U; index <= UART_TEST_JUDGE_COUNT; index++)
+    if (!test_started)
     {
-        due_tick[index] = next_tick;
-        frame_index[index] = 0U;
+        for (uint8_t index = 0U; index <= UART_TEST_JUDGE_COUNT; index++)
+        {
+            test_due_tick[index] = now_tick;
+        }
+        test_started = true;
+    }
+    else if (now_tick - test_tx_start_tick < UART_SEND_MIN_INTERVAL_MS)
+    {
+        return;
+    }
+    if (huart1.gState != HAL_UART_STATE_READY)
+    {
+        if (now_tick - test_tx_start_tick >= UART_TEST_TX_TIMEOUT_MS)
+        {
+            (void)HAL_UART_AbortTransmit(&huart1);
+        }
+        return;
     }
 
-    for (;;)
+    /* 每次调用最多起发一帧：状态帧到期优先，其余按轮询顺序取第一个到期的裁判数据包。 */
+    uint8_t selected = UART_TEST_STATE_INDEX;
+    if ((int32_t)(now_tick - test_due_tick[UART_TEST_STATE_INDEX]) < 0)
     {
-        const uint32_t now_tick = osKernelGetTickCount();
-        if (huart1.gState != HAL_UART_STATE_READY)
+        for (uint8_t checked = 0U; checked < UART_TEST_JUDGE_COUNT; checked++)
         {
-            if (now_tick - tx_start_tick >= UART_TEST_TX_TIMEOUT_MS)
+            selected = (uint8_t)((test_next_judge_packet + checked) % UART_TEST_JUDGE_COUNT);
+            if ((int32_t)(now_tick - test_due_tick[selected]) >= 0)
             {
-                (void)HAL_UART_AbortTransmit(&huart1);
+                break;
             }
+            selected = UART_TEST_STATE_INDEX;
         }
-        else
+    }
+    if ((int32_t)(now_tick - test_due_tick[selected]) < 0)
+    {
+        return;
+    }
+
+    uint16_t length = sizeof(uart_send_cmd_t);
+    uint16_t period_ms = UART_STATE_SEND_INTERVAL_MS;
+    if (selected == UART_TEST_STATE_INDEX)
+    {
+        memcpy(test_tx_buffer, &state_frames[test_frame_index[selected]], sizeof(uart_send_cmd_t));
+        memcpy(&test_tx_buffer[offsetof(uart_send_cmd_t, frame_timestamp)], &now_tick, sizeof(now_tick));
+    }
+    else
+    {
+        /* 与 uart_commun.c 的裁判转发帧一致：0x5A、载荷长度、小端命令码、4 字节 tick、载荷、0xA5。 */
+        const test_packet_t *packet = &test_judge_packets[selected];
+        test_tx_buffer[0] = 0x5AU;
+        test_tx_buffer[1] = packet->length;
+        test_tx_buffer[2] = (uint8_t)packet->command_id;
+        test_tx_buffer[3] = (uint8_t)(packet->command_id >> 8U);
+        memcpy(&test_tx_buffer[4], &now_tick, sizeof(now_tick));
+        memcpy(&test_tx_buffer[8], &packet->frames[(uint16_t)test_frame_index[selected] * packet->length], packet->length);
+        test_tx_buffer[8U + packet->length] = 0xA5U;
+        length = (uint16_t)(8U + packet->length + 1U);
+        period_ms = packet->period_ms;
+    }
+
+    if (HAL_UART_Transmit_DMA(&huart1, test_tx_buffer, length) == HAL_OK)
+    {
+        test_tx_start_tick = now_tick;
+        test_due_tick[selected] += period_ms;
+        test_frame_index[selected] = (uint8_t)((test_frame_index[selected] + 1U) % UART_TEST_FRAME_COUNT);
+        if (selected != UART_TEST_STATE_INDEX)
         {
-            /* 每个周期最多起发一帧：状态帧到期优先，其余按轮询顺序取第一个到期的裁判数据包。 */
-            uint8_t selected = UART_TEST_STATE_INDEX;
-            if ((int32_t)(now_tick - due_tick[UART_TEST_STATE_INDEX]) < 0)
-            {
-                for (uint8_t checked = 0U; checked < UART_TEST_JUDGE_COUNT; checked++)
-                {
-                    selected = (uint8_t)((next_judge_packet + checked) % UART_TEST_JUDGE_COUNT);
-                    if ((int32_t)(now_tick - due_tick[selected]) >= 0)
-                    {
-                        break;
-                    }
-                    selected = UART_TEST_STATE_INDEX;
-                }
-            }
-
-            if ((int32_t)(now_tick - due_tick[selected]) >= 0)
-            {
-                uint16_t length = sizeof(uart_send_cmd_t);
-                uint16_t period_ms = UART_TEST_STATE_PERIOD_MS;
-                if (selected == UART_TEST_STATE_INDEX)
-                {
-                    memcpy(tx_buffer, &state_frames[frame_index[selected]], sizeof(uart_send_cmd_t));
-                    memcpy(&tx_buffer[offsetof(uart_send_cmd_t, frame_timestamp)], &now_tick, sizeof(now_tick));
-                }
-                else
-                {
-                    /* 与 uart_commun.c 的裁判转发帧一致：0x5A、载荷长度、小端命令码、4 字节 tick、载荷、0xA5。 */
-                    const test_packet_t *packet = &judge_packets[selected];
-                    tx_buffer[0] = 0x5AU;
-                    tx_buffer[1] = packet->length;
-                    tx_buffer[2] = (uint8_t)packet->command_id;
-                    tx_buffer[3] = (uint8_t)(packet->command_id >> 8U);
-                    memcpy(&tx_buffer[4], &now_tick, sizeof(now_tick));
-                    memcpy(&tx_buffer[8], &packet->frames[(uint16_t)frame_index[selected] * packet->length], packet->length);
-                    tx_buffer[8U + packet->length] = 0xA5U;
-                    length = (uint16_t)(8U + packet->length + 1U);
-                    period_ms = packet->period_ms;
-                }
-
-                if (HAL_UART_Transmit_DMA(&huart1, tx_buffer, length) == HAL_OK)
-                {
-                    tx_start_tick = now_tick;
-                    due_tick[selected] += period_ms;
-                    frame_index[selected] = (uint8_t)((frame_index[selected] + 1U) % UART_TEST_FRAME_COUNT);
-                    if (selected != UART_TEST_STATE_INDEX)
-                    {
-                        next_judge_packet = (uint8_t)((selected + 1U) % UART_TEST_JUDGE_COUNT);
-                    }
-                }
-            }
+            test_next_judge_packet = (uint8_t)((selected + 1U) % UART_TEST_JUDGE_COUNT);
         }
-
-        next_tick += UART_TEST_PERIOD_MS;
-        osDelayUntil(next_tick);
     }
 }

@@ -2,9 +2,9 @@
 #define VQF_BIAS_CFG_H
 
 /* 使用静止校准结果替换这些值，单位为 rad/s。 */
-#define GYR_BIAS_X     0.00335047115f   /* 不执行启动校准时使用的陀螺仪 X 轴零偏，单位 rad/s */
-#define GYR_BIAS_Y     -0.00236658799f  /* 不执行启动校准时使用的陀螺仪 Y 轴零偏，单位 rad/s*/
-#define GYR_BIAS_Z     0.000909629394f  /* 不执行启动校准时使用的陀螺仪 Z 轴零偏，单位 rad/s*/
+#define GYR_BIAS_X     0.00061f   /* 不执行启动校准时使用的陀螺仪 X 轴零偏，单位 rad/s */
+#define GYR_BIAS_Y     0.00151f  /* 不执行启动校准时使用的陀螺仪 Y 轴零偏，单位 rad/s*/
+#define GYR_BIAS_Z    -0.00179f  /* 不执行启动校准时使用的陀螺仪 Z 轴零偏，单位 rad/s*/
 #define GYR_BIAS_SIGMA 0.0175000001f    /* 固定零偏先验的标准差，同时作为静止校准三轴最大标准差上限，单位 rad/s*/
 #define GYRO_SIGMA_MIN 0.0175f          /* 传入姿态滤波器的零偏标准差下限，单位 rad/s，须为正 */
 
@@ -24,8 +24,8 @@
 #define TEMP_STABLE_N               5U       /* 每阶段需要的连续合格温度观测次数 */
 #define HEATER_INTEGRAL_LIMIT_RATIO 0.5f     /* 温控积分项限幅占输出上限的非负比例，无量纲 */
 #define HEATER_OUT_MAX              1000.0f  /* 温控器输出的正幅值上限，单位为归一化控制量 */
-#define HEATER_KP                   300.0f   /* 温差比例增益，单位为控制量/°C */
-#define HEATER_KI                   20.0f    /* 温差积分增益，单位为控制量/(°C·s) */
+#define HEATER_KP                   330.0f   /* 温差比例增益，单位为控制量/°C，沿用 vqf 试验值，待本机标定 */
+#define HEATER_KI                   24.0f    /* 温差积分增益，单位为控制量/(°C·s)，沿用 vqf 试验值，待本机标定 */
 #define HEATER_KD                   0.0f     /* 温差微分增益，单位为控制量·s/°C*/
 
 /* 静止校准默认配置，加速度限制使用国际单位制。 */

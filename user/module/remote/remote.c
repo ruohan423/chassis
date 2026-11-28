@@ -1,4 +1,5 @@
 #include "remote.h"
+#include "cmsis_os2.h"
 
 RC_Ctl_t rc_data = {.rc = {1024, 1024, 1024, 1024, 1, 1}};
 
@@ -31,21 +32,31 @@ void Remote_RegisterCallbacks(RemoteControlCallback remoteCb,MouseKeyControlCall
     stop_callback     = stopCb     ? stopCb     : stop_control_default;
 }
 
-void remote_clear(void) {
+void remote_clear(void)
+{
+    const int32_t previous_lock = osKernelLock();
+    if (previous_lock < 0)
+    {
+        return;
+    }
+
     rc_data.rc.ch0 = RC_STICK_OFFSET;
     rc_data.rc.ch1 = RC_STICK_OFFSET;
     rc_data.rc.ch2 = RC_STICK_OFFSET;
     rc_data.rc.ch3 = RC_STICK_OFFSET;
-    rc_data.rc.s1  = 2;
-    rc_data.rc.s2  = 1;
+    rc_data.rc.s1 = 2;
+    rc_data.rc.s2 = 1;
     rc_data.dial.ch4 = RC_STICK_OFFSET;
 
     rc_data.mouse.x = rc_data.mouse.y = rc_data.mouse.z = 0;
     rc_data.mouse.press_l = rc_data.mouse.press_r = 0;
     rc_data.mouse.last_press_l = rc_data.mouse.last_press_r = 0;
-
-    rc_data.key.value     = 0;
+    rc_data.key.value = 0;
     rc_data.lastkey.value = 0;
+    if (previous_lock == 0)
+    {
+        (void)osKernelRestoreLock(previous_lock);
+    }
 }
 
 bool remote_frame_is_valid(const uint8_t *RxMsg)
@@ -58,32 +69,52 @@ bool remote_frame_is_valid(const uint8_t *RxMsg)
     return (ch0 >= REMOTE_CHANNEL_MIN) && (ch0 <= REMOTE_CHANNEL_MAX)
         && (ch1 >= REMOTE_CHANNEL_MIN) && (ch1 <= REMOTE_CHANNEL_MAX)
         && (ch2 >= REMOTE_CHANNEL_MIN) && (ch2 <= REMOTE_CHANNEL_MAX)
-        && (ch3 >= REMOTE_CHANNEL_MIN) && (ch3 <= REMOTE_CHANNEL_MAX);
+        && (ch3 >= REMOTE_CHANNEL_MIN) && (ch3 <= REMOTE_CHANNEL_MAX)
+        /* 两个拨杆均只有 1～3 有效，0 不得作为有效输入刷新链路状态。 */
+        && ((RxMsg[5] >> 6) != 0U) && (((RxMsg[5] >> 4) & 0x03U) != 0U);
 }
 
-void remote_rx(const uint8_t *RxMsg) {
+void remote_rx(const uint8_t *RxMsg)
+{
+    /* 只有 Remote_Task 写入；先在局部解码，调度锁仅保护完整快照发布。 */
+    RC_Ctl_t next;
+
     /* 摇杆 */
-    rc_data.rc.ch0 = (int16_t)((RxMsg[0] | (RxMsg[1] << 8)) & 0x07FF);
-    rc_data.rc.ch1 = (int16_t)(((RxMsg[1] >> 3) | (RxMsg[2] << 5)) & 0x07FF);
-    rc_data.rc.ch2 = (int16_t)(((RxMsg[2] >> 6) | (RxMsg[3] << 2) | (RxMsg[4] << 10)) & 0x07FF);
-    rc_data.rc.ch3 = (int16_t)(((RxMsg[4] >> 1) | (RxMsg[5] << 7)) & 0x07FF);
+    next.rc.ch0 = (int16_t)((RxMsg[0] | (RxMsg[1] << 8)) & 0x07FF);
+    next.rc.ch1 = (int16_t)(((RxMsg[1] >> 3) | (RxMsg[2] << 5)) & 0x07FF);
+    next.rc.ch2 = (int16_t)(((RxMsg[2] >> 6) | (RxMsg[3] << 2) | (RxMsg[4] << 10)) & 0x07FF);
+    next.rc.ch3 = (int16_t)(((RxMsg[4] >> 1) | (RxMsg[5] << 7)) & 0x07FF);
 
     /* 开关 */
-    rc_data.rc.s1 = (int8_t)((RxMsg[5] >> 4 & 0x000C) >> 2);
-    rc_data.rc.s2 = (int8_t)(RxMsg[5] >> 4 & 0x0003);
+    next.rc.s1 = (int8_t)((RxMsg[5] >> 4 & 0x000C) >> 2);
+    next.rc.s2 = (int8_t)(RxMsg[5] >> 4 & 0x0003);
 
     /* 鼠标 */
-    rc_data.mouse.x = (int16_t)(RxMsg[6]  | (RxMsg[7]  << 8));
-    rc_data.mouse.y = (int16_t)(RxMsg[8]  | (RxMsg[9]  << 8));
-    rc_data.mouse.z = (int16_t)(RxMsg[10] | (RxMsg[11] << 8));
-    rc_data.mouse.press_l = RxMsg[12];
-    rc_data.mouse.press_r = RxMsg[13];
+    next.mouse.x = (int16_t)(RxMsg[6]  | (RxMsg[7]  << 8));
+    next.mouse.y = (int16_t)(RxMsg[8]  | (RxMsg[9]  << 8));
+    next.mouse.z = (int16_t)(RxMsg[10] | (RxMsg[11] << 8));
+    next.mouse.press_l = RxMsg[12];
+    next.mouse.press_r = RxMsg[13];
 
     /* 键盘：整体赋值到 union.value */
-    rc_data.key.value = (uint16_t)(RxMsg[14] | (RxMsg[15] << 8));
+    next.key.value = (uint16_t)(RxMsg[14] | (RxMsg[15] << 8));
 
     /* 拨轮通道：固定帧末尾两个字节为 11 位原始通道值。 */
-    rc_data.dial.ch4 = (int16_t)((RxMsg[16] | (RxMsg[17] << 8)) & 0x07FFU);
+    next.dial.ch4 = (int16_t)((RxMsg[16] | (RxMsg[17] << 8)) & 0x07FFU);
+
+    int32_t previous_lock = osKernelLock();
+    if (previous_lock < 0)
+    {
+        return;
+    }
+    next.mouse.last_press_l = rc_data.mouse.last_press_l;
+    next.mouse.last_press_r = rc_data.mouse.last_press_r;
+    next.lastkey = rc_data.lastkey;
+    rc_data = next;
+    if (previous_lock == 0)
+    {
+        (void)osKernelRestoreLock(previous_lock);
+    }
 
     /* 模式分发 */
     switch (rc_data.rc.s2) {
@@ -100,7 +131,16 @@ void remote_rx(const uint8_t *RxMsg) {
             break;
     }
     /* 保存上一帧状态 */
+    previous_lock = osKernelLock();
+    if (previous_lock < 0)
+    {
+        return;
+    }
     rc_data.mouse.last_press_l = rc_data.mouse.press_l;
     rc_data.mouse.last_press_r = rc_data.mouse.press_r;
     rc_data.lastkey = rc_data.key;
+    if (previous_lock == 0)
+    {
+        (void)osKernelRestoreLock(previous_lock);
+    }
 }

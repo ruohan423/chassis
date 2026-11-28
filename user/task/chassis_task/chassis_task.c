@@ -11,10 +11,10 @@
 #include "chassis.h"
 #include "remote.h"
 #include "uart_commun.h"
+#include "watchdog_control.h"
 
 #define CHASSIS_TASK_PERIOD_MS     2U    /* 底盘控制周期，单位 ms；PID 按该周期累加，修改后须重新换算 ki、kd，并同时用于功率预算积分。 */
 #define CHASSIS_START_RETRY_MS     100U  /* 总线初始化或发送失败后的重试间隔，单位 ms。 */
-#define CHASSIS_COMMAND_TIMEOUT_MS 200U  /* 上位机控制帧链路超时，单位 ms；超时后导航速度、目标朝向和行为请求复位，全自动档位下速度目标归零。 */
 
 _Static_assert(UART_CHASSIS_BEHAVIOR_MAX == CHASSIS_BEHAVIOR_CLIMB, "UART 控制帧行为编号上限须等于 chassis_behavior_t 的最后一项");
 
@@ -25,7 +25,6 @@ void Chassis_Task(void *argument)
     const uint32_t tick_freq = osKernelGetTickFreq();
     const uint32_t period_ticks = (tick_freq * CHASSIS_TASK_PERIOD_MS + 999U) / 1000U;
     const uint32_t retry_ticks = (tick_freq * CHASSIS_START_RETRY_MS + 999U) / 1000U;
-    const uint32_t command_timeout_ticks = (tick_freq * CHASSIS_COMMAND_TIMEOUT_MS + 999U) / 1000U;
     const float period_s = (float)period_ticks / (float)tick_freq;
     /* 爬坡控制器未接入，两个爬坡输入保持 NAN 表示未激活。 */
     static chassis_command_t command = {
@@ -34,7 +33,6 @@ void Chassis_Task(void *argument)
         .climb_speed = NAN,
     };
     static uart_receive_cmd_t host_command;
-    uint32_t last_command_tick = 0U;
     bool chassis_ready = chassis_init(period_s);
     uint32_t next_tick = osKernelGetTickCount();
 
@@ -49,7 +47,7 @@ void Chassis_Task(void *argument)
         }
 
         const uint32_t tick = osKernelGetTickCount();
-        /* 上位机数据为外部输入，非有限值的帧不采用，也不刷新链路时间。 */
+        /* 上位机数据为外部输入，非有限值的帧不采用，也不喂 WATCH_NAV。 */
         if (uart_read_command(&host_command) && isfinite(host_command.data.x) && isfinite(host_command.data.y)
             && isfinite(host_command.data.w) && isfinite(host_command.data.target_yaw))
         {
@@ -60,11 +58,11 @@ void Chassis_Task(void *argument)
             /* 行为编号已由 UART 接收校验，取值与 chassis_behavior_t 一一对应；仅遥控器选中全自动时由控制层采用。 */
             command.nav_behavior = (chassis_behavior_t)host_command.data.chassis_behavior;
             command.nav_online = true;
-            last_command_tick = tick;
+            watchdog_control_feed(WATCH_NAV);
         }
-        if (command.nav_online && tick - last_command_tick >= command_timeout_ticks)
+        if (command.nav_online && watchdog_control_is_expired(WATCH_NAV))
         {
-            /* 链路超时：导航速度和目标朝向清零，行为请求回到直控，全自动档位下速度目标归零。 */
+            /* 导航指令超时（WATCH_NAV，200 ms）：导航速度和目标朝向清零，行为请求回到直控，全自动档位下速度目标归零。 */
             command.nav_vx = 0.0f;
             command.nav_vy = 0.0f;
             command.nav_wz = 0.0f;
